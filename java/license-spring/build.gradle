@@ -1,0 +1,4 @@
+dependencies { api project(':license-core') }
+
+// The Phase 1 adapter deliberately has no public classes to document.
+tasks.named('javadoc') { enabled = false }

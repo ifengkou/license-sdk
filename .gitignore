@@ -1,0 +1,14 @@
+.gradle/
+**/build/
+.venv/
+**/.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/dist/
+*.egg-info/
+.DS_Store

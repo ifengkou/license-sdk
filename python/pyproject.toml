@@ -1,0 +1,33 @@
+[project]
+name = "metor-license-core"
+version = "0.1.0"
+description = "Framework-independent offline license protocol primitives"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/license_sdk"]
+
+[tool.uv.workspace]
+members = ["fastapi"]
+
+[dependency-groups]
+dev = ["ruff>=0.11,<1", "mypy>=1.15,<2", "pytest>=8.3,<10"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

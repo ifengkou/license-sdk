@@ -1,0 +1,121 @@
+{
+  "format_version": 1,
+  "purpose": "public-design-vectors-only",
+  "notice": "All inputs are synthetic. This file contains no signing keys, signatures, or customer data. It validates encoding rules, not the unimplemented Java/Python services.",
+  "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "crc": "CRC16-XMODEM poly=0x1021 init=0 refin=false refout=false xorout=0",
+  "binding_vectors": [
+    {
+      "case": "base",
+      "machine_id": "00112233445566778899aabbccddeeff",
+      "installation_id": "00112233-4455-4677-8899-aabbccddeeff",
+      "host_fingerprint": "288d3f2b1cd8cf2f04ed09270316b4b3281b52f62c356b9725e740410ce6e840",
+      "binding_id": "6e557d24d92ba076121accaa712ec769bbc085df",
+      "request_code": "IC1-DSAQT9-6S5EG7-C4GTSJ-N72BP7-D6XW11-EZ1YYG"
+    },
+    {
+      "case": "different-host",
+      "machine_id": "ffeeddccbbaa99887766554433221100",
+      "installation_id": "00112233-4455-4677-8899-aabbccddeeff",
+      "host_fingerprint": "08b2f8ea7da48e2ef9f333ca4c877d56d6058ce10982b4be4b805bc7b00e5405",
+      "binding_id": "72458303dfed35868a2a30ece28fc230af43b043",
+      "request_code": "IC1-E92R60-YZXMTR-D2HA63-PE53Y2-62QM7C-23223G"
+    },
+    {
+      "case": "different-installation",
+      "machine_id": "00112233445566778899aabbccddeeff",
+      "installation_id": "00112233-4455-4677-8899-aabbccddee00",
+      "host_fingerprint": "288d3f2b1cd8cf2f04ed09270316b4b3281b52f62c356b9725e740410ce6e840",
+      "binding_id": "8f0f21e50d95b12788a33dfc8cd54b3e73d5d9fa",
+      "request_code": "IC1-HW7J3S-8DJPRJ-F2537Q-Y8SNAB-7SSXBP-FTFTF0"
+    }
+  ],
+  "manual_positive_inputs": [
+    {
+      "input": "IC1-DSAQT9-6S5EG7-C4GTSJ-N72BP7-D6XW11-EZ1YYG",
+      "expected_binding_id": "6e557d24d92ba076121accaa712ec769bbc085df"
+    },
+    {
+      "input": "ic1-dsaqt9-6s5eg7-c4gtsj-n72bp7-d6xw11-ez1yyg",
+      "expected_binding_id": "6e557d24d92ba076121accaa712ec769bbc085df"
+    },
+    {
+      "input": "IC1DSAQT96S5EG7C4GTSJN72BP7D6XW11EZ1YYG",
+      "expected_binding_id": "6e557d24d92ba076121accaa712ec769bbc085df"
+    },
+    {
+      "input": " IC1-dsaqt9-6s5eg7-c4gtsj-n72bp7-d6xwll-ezlyyg\n",
+      "expected_binding_id": "6e557d24d92ba076121accaa712ec769bbc085df"
+    }
+  ],
+  "manual_negative_inputs": [
+    {
+      "input": "IC1-0SAQT96S5EG7C4GTSJN72BP7D6XW11EZ1YYG",
+      "expected_error": "CHECKSUM"
+    },
+    {
+      "input": "IC1-DSAQT96S5EG7C4GTSJN72BP7D6XW11EZ1YYH",
+      "expected_error": "PADDING"
+    },
+    {
+      "input": "IC1-DSAQT96S5EG7C4GTSJN72BP7D6XW11EZ1YY",
+      "expected_error": "LENGTH"
+    },
+    {
+      "input": "IC1-USAQT96S5EG7C4GTSJN72BP7D6XW11EZ1YYG",
+      "expected_error": "CHARACTER"
+    },
+    {
+      "input": "RC1J-DSAQT96S5EG7C4GTSJN72BP7D6XW11EZ1YYG",
+      "expected_error": "PREFIX"
+    }
+  ],
+  "recovery_vectors": [
+    {
+      "service": "metor",
+      "installation_id": "00112233-4455-4677-8899-aabbccddeeff",
+      "nonce": "11223344-5566-4788-99aa-bbccddeeff00",
+      "state_identity": "a66debd75f40936fee920d6a6f540b309728e60b22190431d948c9fa151005e6",
+      "target_id": "4779768dfa198021bdf9803a16961de4c26dcf7f",
+      "recovery_code": "RC1J-8XWQD3-FT3602-3FFSG0-X1D5GX-WK16VK-VZRZWG"
+    },
+    {
+      "service": "ai",
+      "installation_id": "00112233-4455-4677-8899-aabbccddeeff",
+      "nonce": "11223344-5566-4788-99aa-bbccddeeff00",
+      "state_identity": "a66debd75f40936fee920d6a6f540b309728e60b22190431d948c9fa151005e6",
+      "target_id": "7a3ac4a6d3648dc5247ef04e0627fd0b4ff02323",
+      "recovery_code": "RC1A-F8XC99-PKCJ6W-A93YY1-70C9ZX-1D7Z08-S3DMD0"
+    }
+  ],
+  "unsigned_license_shape_examples": [
+    {
+      "validity_type": "TERM",
+      "expires_at": "2027-10-20T00:00:00Z",
+      "binding_type": "HOST_INSTALL",
+      "binding_scheme": "host-install-code-v1",
+      "binding_id": "6e557d24d92ba076121accaa712ec769bbc085df"
+    },
+    {
+      "validity_type": "TERM",
+      "expires_at": "2027-10-20T00:00:00Z",
+      "binding_type": "UNBOUND",
+      "binding_scheme": null,
+      "binding_id": null
+    },
+    {
+      "validity_type": "PERPETUAL",
+      "expires_at": null,
+      "binding_type": "HOST_INSTALL",
+      "binding_scheme": "host-install-code-v1",
+      "binding_id": "6e557d24d92ba076121accaa712ec769bbc085df"
+    },
+    {
+      "validity_type": "PERPETUAL",
+      "expires_at": null,
+      "binding_type": "UNBOUND",
+      "binding_scheme": null,
+      "binding_id": null
+    }
+  ]
+}

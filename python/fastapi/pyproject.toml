@@ -1,0 +1,16 @@
+[project]
+name = "metor-license-fastapi"
+version = "0.1.0"
+description = "FastAPI integration contracts for metor-license-core"
+requires-python = ">=3.12"
+dependencies = ["metor-license-core==0.1.0", "fastapi>=0.115,<1"]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/license_sdk_fastapi"]
+
+[tool.uv.sources]
+metor-license-core = { workspace = true }

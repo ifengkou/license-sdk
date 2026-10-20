@@ -1,0 +1,38 @@
+{
+  "format_version": 1,
+  "purpose": "synthetic-test-trust-only",
+  "notice": "Public test key and synthetic signed envelopes only. The ephemeral private key was discarded, never persisted. This key must never enter production trust. These fixtures do not implement or validate the SDK license verifier.",
+  "algorithm": "Ed25519",
+  "key_id": "phase1-test-only",
+  "public_key_spki_base64": "MCowBQYDK2VwAyEA/j0dBPYQkArICHJgVExjdbW0D7TiOUkmIkQlttK3h8I=",
+  "cases": [
+    {
+      "case": "TERM-HOST_INSTALL",
+      "envelope": {
+        "payload": "eyJiaW5kaW5nX2lkIjoiNmU1NTdkMjRkOTJiYTA3NjEyMWFjY2FhNzEyZWM3NjliYmMwODVkZiIsImJpbmRpbmdfc2NoZW1lIjoiaG9zdC1pbnN0YWxsLWNvZGUtdjEiLCJiaW5kaW5nX3R5cGUiOiJIT1NUX0lOU1RBTEwiLCJjdXN0b21lcl9pZCI6InN5bnRoZXRpYy10ZXN0IiwiY3VzdG9tZXJfbmFtZSI6IlN5bnRoZXRpYyB0ZXN0IGN1c3RvbWVyIiwiZXhwaXJlc19hdCI6IjIwMjctMTAtMjBUMDA6MDA6MDBaIiwiaXNzdWVkX2F0IjoiMjAyNi0xMC0yMFQwMDowMDowMFoiLCJrZXlfaWQiOiJwaGFzZTEtdGVzdC1vbmx5Iiwia2luZCI6ImNvbW1lcmNpYWwtbGljZW5zZSIsImxpY2Vuc2VfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJub3RfYmVmb3JlIjoiMjAyNi0xMC0yMFQwMDowMDowMFoiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJzY2hlbWFfdmVyc2lvbiI6MSwidmFsaWRpdHlfdHlwZSI6IlRFUk0ifQ",
+        "signature": "nJM1NI8g0RoD4uTuCvY1NtnIL1x5n_o_sKPOPWSwecd5fLj2VXKCaHxk4T03QI6R676XuNL-j5Mo8uveHS_bBw"
+      }
+    },
+    {
+      "case": "PERPETUAL-HOST_INSTALL",
+      "envelope": {
+        "payload": "eyJiaW5kaW5nX2lkIjoiNmU1NTdkMjRkOTJiYTA3NjEyMWFjY2FhNzEyZWM3NjliYmMwODVkZiIsImJpbmRpbmdfc2NoZW1lIjoiaG9zdC1pbnN0YWxsLWNvZGUtdjEiLCJiaW5kaW5nX3R5cGUiOiJIT1NUX0lOU1RBTEwiLCJjdXN0b21lcl9pZCI6InN5bnRoZXRpYy10ZXN0IiwiY3VzdG9tZXJfbmFtZSI6IlN5bnRoZXRpYyB0ZXN0IGN1c3RvbWVyIiwiZXhwaXJlc19hdCI6bnVsbCwiaXNzdWVkX2F0IjoiMjAyNi0xMC0yMFQwMDowMDowMFoiLCJrZXlfaWQiOiJwaGFzZTEtdGVzdC1vbmx5Iiwia2luZCI6ImNvbW1lcmNpYWwtbGljZW5zZSIsImxpY2Vuc2VfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJub3RfYmVmb3JlIjoiMjAyNi0xMC0yMFQwMDowMDowMFoiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJzY2hlbWFfdmVyc2lvbiI6MSwidmFsaWRpdHlfdHlwZSI6IlBFUlBFVFVBTCJ9",
+        "signature": "yakmyQt037X4PGywF_0Vlu9lBiMkWNP37SSzzfGhW9eaF4ESn4T_cbCgJpsGo1pXdkcHFaEh5P0hPHJQyxD1CA"
+      }
+    },
+    {
+      "case": "TERM-UNBOUND",
+      "envelope": {
+        "payload": "eyJiaW5kaW5nX2lkIjpudWxsLCJiaW5kaW5nX3NjaGVtZSI6bnVsbCwiYmluZGluZ190eXBlIjoiVU5CT1VORCIsImN1c3RvbWVyX2lkIjoic3ludGhldGljLXRlc3QiLCJjdXN0b21lcl9uYW1lIjoiU3ludGhldGljIHRlc3QgY3VzdG9tZXIiLCJleHBpcmVzX2F0IjoiMjAyNy0xMC0yMFQwMDowMDowMFoiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDAwOjAwOjAwWiIsImtleV9pZCI6InBoYXNlMS10ZXN0LW9ubHkiLCJraW5kIjoiY29tbWVyY2lhbC1saWNlbnNlIiwibGljZW5zZV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsIm5vdF9iZWZvcmUiOiIyMDI2LTEwLTIwVDAwOjAwOjAwWiIsInByb2R1Y3RfaWQiOiJpY3AtZGlhZyIsInNjaGVtYV92ZXJzaW9uIjoxLCJ2YWxpZGl0eV90eXBlIjoiVEVSTSJ9",
+        "signature": "L_qe1cR2wl941ST5a94jl2zsRHJhGzyfHLwh8itlDhgf_oCbCrxChpoKvd_LlOpzrQU2EAiFOHRy3-rqcstnBA"
+      }
+    },
+    {
+      "case": "PERPETUAL-UNBOUND",
+      "envelope": {
+        "payload": "eyJiaW5kaW5nX2lkIjpudWxsLCJiaW5kaW5nX3NjaGVtZSI6bnVsbCwiYmluZGluZ190eXBlIjoiVU5CT1VORCIsImN1c3RvbWVyX2lkIjoic3ludGhldGljLXRlc3QiLCJjdXN0b21lcl9uYW1lIjoiU3ludGhldGljIHRlc3QgY3VzdG9tZXIiLCJleHBpcmVzX2F0IjpudWxsLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDAwOjAwOjAwWiIsImtleV9pZCI6InBoYXNlMS10ZXN0LW9ubHkiLCJraW5kIjoiY29tbWVyY2lhbC1saWNlbnNlIiwibGljZW5zZV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCIsIm5vdF9iZWZvcmUiOiIyMDI2LTEwLTIwVDAwOjAwOjAwWiIsInByb2R1Y3RfaWQiOiJpY3AtZGlhZyIsInNjaGVtYV92ZXJzaW9uIjoxLCJ2YWxpZGl0eV90eXBlIjoiUEVSUEVUVUFMIn0",
+        "signature": "DHf1CumAG_qJmJQLfaYmPArS1Lgg6drk6qeBfGOtfCMh2VCBohfLuA0g6uOViAok1l0zKaALT0GitbchcqxZAw"
+      }
+    }
+  ]
+}
