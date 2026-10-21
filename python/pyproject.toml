@@ -1,9 +1,9 @@
 [project]
 name = "metor-license-core"
-version = "0.3.0"
+version = "0.4.0"
 description = "Framework-independent offline license protocol primitives"
 requires-python = ">=3.12"
-dependencies = ["cryptography>=44,<47"]
+dependencies = ["cryptography>=44,<47", "PyJWT>=2.10,<3"]
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]

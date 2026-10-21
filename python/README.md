@@ -2,7 +2,7 @@
 
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal
-SDK development only; published adapter metadata pins `metor-license-core==0.3.0`.
+SDK development only; published adapter metadata pins `metor-license-core==0.4.0`.
 
 Phase 1 implements product profiles, host/install binding digests, manual request/recovery
 code codecs, packaged public vectors, an admission protocol and a thin FastAPI adapter.
@@ -49,3 +49,17 @@ are packaged as `license_sdk/data/clock-state-v1-vectors.json`; they are test ma
 The core uses POSIX file locks, no-follow regular file reads and atomic same-directory replace
 with file/directory fsync. Production is Linux; tests also run on macOS. It does not provide
 Windows locking fallbacks or claim cross-service atomic transactions.
+
+Phase 4 adds `license_sdk.proofs.ControlProof` with fixed HS256, explicitly selected
+product domains and dedicated installation credentials. The runtime credential seam
+`control_proof(config=...)` requires the product to supply its explicit issuer/audience/domain. CONTROL tokens bind issuer,
+audience, installation UUID, scope, HTTP method, exact path and raw body SHA-256.
+They have a maximum 60-second lifetime and 5-second transport skew, using real UTC.
+They are unrelated to user JWTs, commercial Ed25519 signatures and TASK proofs.
+
+`LicenseRuntime.preflight(raw)` validates a candidate against real UTC, independently
+reports current clock restrictions, and never publishes, checkpoints or creates lock
+files. Initial activation works without an existing commercial file.
+`status(read_only=True)` provides the same non-writing diagnostics. `check(Operation)`
+implements request-level eligibility; products must supply explicit route semantics.
+Unknown operations require ACTIVE. These methods do not confer task continuation rights.

@@ -42,6 +42,22 @@ class LicenseRuntimeTest {
         void advance(long nanos) { mono += nanos; wall = wall.plusNanos(nanos); }
     }
 
+    @Test void candidatePreflightAndInspectionNeverCheckpointEvenAfterThirtySeconds() throws Exception {
+        Fixture f = new Fixture(); var runtime = f.runtime(); runtime.status();
+        byte[] clockBefore = Files.readAllBytes(f.clock); byte[] candidate = Files.readAllBytes(f.license);
+        Files.delete(f.license); f.time.advance(31_000_000_000L);
+        assertEquals(CommercialLicenseVerifier.Status.ACTIVE, runtime.preflight(candidate).status());
+        assertEquals(LicenseRuntime.State.UNLICENSED, runtime.inspect().state());
+        assertArrayEquals(clockBefore, Files.readAllBytes(f.clock)); assertFalse(Files.exists(f.license));
+        Files.write(f.clock, new byte[]{0});
+        assertEquals(CommercialLicenseVerifier.Status.ACTIVE, runtime.preflight(candidate).status());
+        assertEquals(LicenseRuntime.State.CLOCK_STATE_INVALID, afterInstall(f, runtime, candidate).state());
+        assertArrayEquals(new byte[]{0}, Files.readAllBytes(f.clock));
+    }
+    private static LicenseRuntime.Snapshot afterInstall(Fixture f, LicenseRuntime runtime, byte[] candidate) throws IOException {
+        Files.write(f.license, candidate); return runtime.inspect();
+    }
+
     private final class Fixture {
         final Path identity;
         final Path keyFile;

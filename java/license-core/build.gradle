@@ -10,6 +10,7 @@ sourceSets.test.resources.srcDir('../../protocol')
 
 // Standalone conformance drivers consume the built runtime, without test dependencies.
 tasks.register('writeRuntimeClasspath') {
+    inputs.property('releaseVersion', project.version.toString())
     dependsOn tasks.named('jar')
     def target = layout.buildDirectory.file('runtime-classpath.txt')
     outputs.file(target)

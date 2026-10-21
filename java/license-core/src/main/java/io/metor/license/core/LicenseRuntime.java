@@ -86,7 +86,34 @@ public final class LicenseRuntime {
     /** Force durable reference before a future execution gate admits new work. Does not itself admit work. */
     public synchronized Snapshot beforeExecution() { return observe(true); }
 
-    private Snapshot observe(boolean force) {
+    /** Candidate verification uses actual UTC and never reads or writes the clock state. */
+    public synchronized CommercialLicenseVerifier.VerifiedLicense preflight(byte[] candidate) throws IOException {
+        if (!configured) throw new IllegalArgumentException("Invalid controlled configuration");
+        Installation identity = identity();
+        return verifier.verifyWithBindingProvider(candidate, () -> binding(identity), time.utcNow());
+    }
+
+    /** Stable initialized identity; management access does not reset installation or time state. */
+    public synchronized UUID installationId() throws IOException { return identity().id(); }
+
+    public synchronized String bindingId() throws IOException { return binding(identity()); }
+
+    /** Only a purpose-derived key leaves the runtime; the master key is never returned. */
+    public synchronized byte[] derivedKey(String domain) throws IOException {
+        if (domain == null || !domain.matches("[A-Za-z0-9/._-]{1,128}")) throw new IllegalArgumentException("Invalid domain");
+        try {
+            var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(identity().key(), "HmacSHA256"));
+            return mac.doFinal(domain.getBytes(StandardCharsets.UTF_8));
+        } catch (GeneralSecurityException error) { throw new IllegalStateException("HMAC unavailable", error); }
+    }
+
+    /** Diagnostic snapshot for a candidate transaction: never checkpoints or replaces files. */
+    public synchronized Snapshot inspect() { return observe(false, false); }
+
+    private Snapshot observe(boolean force) { return observe(force, true); }
+
+    private Snapshot observe(boolean force, boolean writable) {
         Instant wall = time.utcNow();
         long mono = time.monotonicNanos();
         if (!configured) { return snapshot(State.CONFIG_INVALID, List.of("CONFIG_INVALID"), null, wall, wall); }
@@ -98,14 +125,14 @@ public final class LicenseRuntime {
         }
         try {
             Path lock = config.clockFile().resolveSibling(config.clockFile().getFileName() + ".lock");
-            return store.withLock(lock, () -> lockedObserve(identity, wall, mono, force));
+            return store.withLock(lock, () -> lockedObserve(identity, wall, mono, force, writable));
         } catch (IOException | IllegalArgumentException | UnsupportedOperationException error) {
             persistenceFailed = true;
             return withoutClock(identity, wall, "CLOCK_STATE_INVALID");
         }
     }
 
-    private Snapshot lockedObserve(Installation identity, Instant wall, long mono, boolean force) throws IOException {
+    private Snapshot lockedObserve(Installation identity, Instant wall, long mono, boolean force, boolean writable) throws IOException {
         ClockState clock;
         String clockDigest;
         try {
@@ -147,7 +174,7 @@ public final class LicenseRuntime {
         if (rollback) { reasons.add("CLOCK_ROLLBACK"); }
         if (!rollback) {
             high = effective;
-            if (force || mono - checkpointNanos >= 30_000_000_000L) {
+            if (writable && (force || mono - checkpointNanos >= 30_000_000_000L)) {
                 try {
                     ClockState update = new ClockState(config.productId(), identity.id(), config.service(),
                         clock.epoch(), Math.addExact(clock.sequence(), 1), high.truncatedTo(ChronoUnit.SECONDS),

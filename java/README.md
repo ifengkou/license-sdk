@@ -1,7 +1,7 @@
-# Java license SDK — Phase 3
+# Java license SDK — Phase 4
 
 Java 21 standalone Gradle project. Provisional local coordinates are
-`io.metor.license:license-core:0.3.0` and `io.metor.license:license-spring:0.3.0`.
+`io.metor.license:license-core:0.4.0` and `io.metor.license:license-spring:0.4.0`.
 These names are not a confirmed organization namespace or a remote publication.
 The Gradle 8.14 wrapper is copied unchanged from the existing Metor wrapper.
 
@@ -27,11 +27,19 @@ Implemented:
   calls the provider. Ordinary `verify(bytes, localBindingId, now)` supports
   hosts that already have the recomputed binding available.
 
-`license-spring` is only a separately publishable adapter skeleton depending on
-core. It has no Spring dependency, filter, auto-configuration or enforcement yet.
-Phase 3 adds `ClockStateCodec`, `LicenseRuntime`, `TimeSource` and atomic `StateStore`
-for installation observation and durable UTC/monotonic rollback protection. No signing,
-private-key handling, recovery application or business enforcement is implemented yet. A decoded manual
+`license-spring` provides `ControlProofCodec(issuer, audience)`, a dedicated bounded
+HS256 CONTROL JWS signer/verifier using an already purpose-derived 32-byte key.
+It explicitly depends on Nimbus JOSE/JWT 9.37.4 and Jackson 2.18.8; consumers
+align these through their framework dependency constraints. It does not install
+a filter or choose business routes automatically. Commercial signing and private
+key handling remain exclusively in the issuer project.
+
+`LicenseRuntime.preflight(candidate)` verifies against actual UTC without writing
+the license or clock. `inspect()` observes restrictions without checkpointing.
+`OperationPolicy` expresses MANAGEMENT, READ_EXISTING and NEW_EXECUTION; products
+map explicit routes and default unknown operations to NEW_EXECUTION. Product HTTP
+adapters enforce these decisions after account authorization. Background task
+admission, continuation and time recovery remain later phases. A decoded manual
 code is an identity/checksum value, never authorization.
 
 ```sh
@@ -39,19 +47,19 @@ code is an identity/checksum value, never authorization.
 ```
 
 The `examples/StandaloneCodec.java` smoke uses only the built core JAR and JDK 21.
-Copy that source and `license-core/build/libs/license-core-0.3.0.jar` into an empty
+Copy that source and `license-core/build/libs/license-core-0.4.0.jar` into an empty
 directory, then run:
 
 ```sh
-javac -cp license-core-0.3.0.jar StandaloneCodec.java
-java -cp license-core-0.3.0.jar:. StandaloneCodec
+javac -cp license-core-0.4.0.jar StandaloneCodec.java
+java -cp license-core-0.4.0.jar:. StandaloneCodec
 ```
 
 For local publication verification, run
 `./gradlew publishAllPublicationsToVerificationRepository`. This writes both
 versioned Maven publications to `build/maven-repository`, never a remote registry.
-A detached consumer may resolve `io.metor.license:license-spring:0.3.0` from a copy
-of that directory; its POM pins `license-core:0.3.0` transitively. The copied
+A detached consumer may resolve `io.metor.license:license-spring:0.4.0` from a copy
+of that directory; its POM pins `license-core:0.4.0` transitively. The copied
 repository is sufficient without any SDK source or business checkout.
 
 No build uses sibling business source or `.agents` files. Gradle needs its pinned
@@ -65,3 +73,15 @@ runtime dependency classpath to `license-core/build/runtime-classpath.txt` for
 standalone cross-language conformance drivers. No test keys or signing entry
 points are included in the runtime JAR. Product assembly must supply its own
 trusted Ed25519 public keys and actual identity/time sources.
+
+CONTROL proofs bind exact raw body SHA-256, method, actual path, installation,
+issuer/audience, purpose, scope and UUIDv4 jti. They require integer iat/exp,
+maximum 60-second lifetime and five-second transport skew using real UTC.
+Only the exact alg=HS256,typ=JWT header is accepted; duplicate/extra claims,
+noncanonical Base64URL, foreign products and mismatched requests are rejected.
+Identical retries within the window are allowed; this is not exactly-once delivery.
+Use separate control-domain derived keys; never reuse account JWT keys.
+
+`./gradlew :license-spring:writeRuntimeClasspath` emits the adapter and transitive
+runtime classpath for `tools/verify_phase4_control.py`, separately from the JDK-only
+core classpath. No commercial private key or test trust enters either JAR.

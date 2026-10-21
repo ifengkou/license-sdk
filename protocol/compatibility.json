@@ -1,11 +1,12 @@
 {
-  "sdk_version": "0.3.0",
-  "status": "phase-3-runtime-clock-no-business-enforcement",
+  "sdk_version": "0.4.0",
+  "status": "phase-4-control-preflight-http-no-background-enforcement",
   "implemented_protocols": [
     "IC1",
     "RC1J",
     "RC1A",
-    "commercial-license-v1"
+    "commercial-license-v1",
+    "internal-control-v1"
   ],
   "commercial_license_schema_version": 1,
   "commercial_license_implemented": true,
@@ -30,5 +31,8 @@
   "clock_vectors": {
     "file": "clock-state-v1-vectors.json",
     "sha256": "05c10295929091cbdb60d51d751d3f331947c5147f8e1785d1aaa4c877c4ee11"
-  }
+  },
+  "http_enforcement_implemented": true,
+  "background_enforcement_implemented": false,
+  "recovery_application_implemented": false
 }

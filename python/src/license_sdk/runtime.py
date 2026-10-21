@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -21,8 +21,10 @@ from types import MappingProxyType
 from typing import Protocol
 from uuid import UUID
 
+from license_sdk.contracts import Admission, Operation
 from license_sdk.identity import binding_id, host_fingerprint, installation_uuid
 from license_sdk.profile import ProductProfile
+from license_sdk.proofs import ControlProof, ControlProofConfig
 from license_sdk.verification import (
     CommercialLicense,
     LicenseErrorReason,
@@ -334,12 +336,14 @@ class LicenseRuntime:
             raise ValueError("installation changed while running")
         self._installation, self._master = data["installation_id"], master
 
-    def _clock_observe(self, wall: datetime, mono: int, force: bool) -> tuple[datetime, bool]:
+    def _clock_observe(
+        self, wall: datetime, mono: int, force: bool, read_only: bool = False
+    ) -> tuple[datetime, bool]:
         if self._clock_invalid:
             return wall, False
         try:
             assert self._installation is not None and self._master is not None
-            with self.store.locked():
+            with nullcontext() if read_only else self.store.locked():
                 raw = self.store.read()
                 clock = decode_clock(
                     raw,
@@ -369,10 +373,14 @@ class LicenseRuntime:
                 rollback = wall + timedelta(seconds=300) < reference
                 self._clock, self._raw_clock = clock, raw
                 self._last_effective = effective
-                if not rollback and (
-                    force
-                    or self._checkpoint_ns is None
-                    or mono - self._checkpoint_ns >= 30_000_000_000
+                if (
+                    not read_only
+                    and not rollback
+                    and (
+                        force
+                        or self._checkpoint_ns is None
+                        or mono - self._checkpoint_ns >= 30_000_000_000
+                    )
                 ):
                     if clock.sequence == MAX_COUNTER:
                         raise ValueError("clock sequence exhausted")
@@ -421,7 +429,7 @@ class LicenseRuntime:
             effective_now=effective,
         )
 
-    def status(self, *, force_checkpoint: bool = False) -> RuntimeStatus:
+    def status(self, *, force_checkpoint: bool = False, read_only: bool = False) -> RuntimeStatus:
         with self._lock:
             wall, mono = self.time.wall_now(), self.time.monotonic_ns()
             if wall.tzinfo is None or wall.utcoffset() is None or type(mono) is not int or mono < 0:
@@ -443,7 +451,7 @@ class LicenseRuntime:
                 and self._installation is not None
                 and self._master is not None
             ):
-                effective, rollback = self._clock_observe(wall, mono, force_checkpoint)
+                effective, rollback = self._clock_observe(wall, mono, force_checkpoint, read_only)
             if self._clock_invalid:
                 reasons.append(RuntimeState.CLOCK_STATE_INVALID)
             verified: VerifiedLicense | None = None
@@ -492,3 +500,59 @@ class LicenseRuntime:
                 verified.payload_digest if verified else None,
                 file_digest,
             )
+
+    def check(self, operation: Operation) -> Admission:
+        """Request-level eligibility only; does not confer task continuation rights."""
+        if operation == Operation.SESSION_OR_MANAGEMENT:
+            return Admission(True, "MANAGEMENT")
+        status = self.status(read_only=True)
+        allowed = status.mode in ("NORMAL", "DEVELOPMENT") or (
+            status.mode == "READ_ONLY" and operation == Operation.READ_EXISTING
+        )
+        return Admission(allowed, status.state.value)
+
+    def control_proof(self, *, config: ControlProofConfig) -> ControlProof:
+        """Read and validate installation credentials even in DEVELOPMENT mode."""
+        with self._lock:
+            self._identity()
+            assert self._master is not None and self._installation is not None
+            return ControlProof(
+                config=config,
+                service_key=self._master,
+                installation_id=self._installation,
+            )
+
+    def preflight(self, raw: bytes) -> "CandidateStatus":
+        """Verify against real UTC without publishing or checkpointing any state."""
+        with self._lock:
+            digest = hashlib.sha256(raw).hexdigest()
+            try:
+                self._identity()
+                if self._config_invalid:
+                    raise ValueError("runtime configuration invalid")
+                verified = self._verify(raw, self.time.wall_now())
+            except (OSError, ValueError):
+                return CandidateStatus(False, digest, None, RuntimeState.INVALID, ())
+            current = self.status(read_only=True)
+            state = RuntimeState(verified.status.value)
+            restrictions = tuple(
+                reason
+                for reason in current.reasons
+                if reason in (RuntimeState.CLOCK_STATE_INVALID, RuntimeState.CLOCK_ROLLBACK)
+            )
+            return CandidateStatus(
+                verified.status == LicenseStatus.ACTIVE,
+                digest,
+                verified.payload_digest,
+                state,
+                restrictions,
+            )
+
+
+@dataclass(frozen=True)
+class CandidateStatus:
+    acceptable: bool
+    file_digest: str
+    payload_digest: str | None
+    state: RuntimeState
+    reasons: tuple[RuntimeState, ...]

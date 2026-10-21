@@ -1,4 +1,4 @@
-"""Offline license SDK core, version 0.3.0."""
+"""Offline license SDK core, version 0.4.0."""
 
 from license_sdk.codes import CodeError, CodeErrorReason, decode_code, encode_code
 from license_sdk.profile import ICP_DIAG, ProductProfile

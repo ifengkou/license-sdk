@@ -444,3 +444,86 @@ def test_public_seed_vectors_are_packaged_and_match():
         )
         clock = decode_clock(raw, **params)
         assert encode_clock(clock, **params) == raw
+
+
+def test_preflight_never_persists_and_allows_initial_activation(runtime):
+    instance, clock, root, _, _ = runtime
+    active = root / "shared/active.license.json"
+    raw = active.read_bytes()
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    instance.status(read_only=True)
+    clock.advance(60)
+    assert instance.preflight(raw).acceptable
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    assert not (root / "state/ai/clock.lock").exists()
+    active.unlink()
+    assert instance.preflight(raw).acceptable
+    assert not active.exists()
+
+
+def test_preflight_real_utc_ignores_polluted_reference_retains_restriction(runtime):
+    instance, clock, root, _, _ = runtime
+    raw = (root / "shared/active.license.json").read_bytes()
+    instance.status(read_only=True)
+    clock.wall += timedelta(days=500)
+    instance.status(force_checkpoint=True)
+    clock.wall = NOW
+    before = (root / "state/ai/clock.json").read_bytes()
+    result = instance.preflight(raw)
+    assert result.acceptable
+    assert RuntimeState.CLOCK_ROLLBACK in result.reasons
+    assert (root / "state/ai/clock.json").read_bytes() == before
+    assert instance.status(read_only=True).mode == "READ_ONLY"
+
+
+def test_preflight_future_expired_invalid_and_wrong_host(runtime):
+    instance, _, root, _, publish = runtime
+    for changes, state in [
+        ({"not_before": "2027-01-01T00:00:00Z"}, RuntimeState.NOT_YET_VALID),
+        (
+            {"not_before": "2026-10-19T00:00:00Z", "expires_at": "2026-10-20T00:00:00Z"},
+            RuntimeState.EXPIRED,
+        ),
+        (
+            {
+                "binding_type": "HOST_INSTALL",
+                "binding_scheme": "host-install-code-v1",
+                "binding_id": "a" * 40,
+            },
+            RuntimeState.INVALID,
+        ),
+    ]:
+        publish(changes)
+        result = instance.preflight((root / "shared/active.license.json").read_bytes())
+        assert not result.acceptable
+        assert result.state == state
+    assert not instance.preflight(b"invalid").acceptable
+
+
+def test_request_guard_observes_file_each_time(runtime):
+    from license_sdk.contracts import Operation
+
+    instance, _, root, _, publish = runtime
+    assert instance.check(Operation.COMPUTE).allowed
+    publish({"not_before": "2026-10-19T00:00:00Z", "expires_at": "2026-10-20T00:00:00Z"})
+    assert instance.check(Operation.READ_EXISTING).allowed
+    for operation in (Operation.MODIFY, Operation.COMPUTE, Operation.UNKNOWN):
+        assert not instance.check(operation).allowed
+    (root / "shared/active.license.json").unlink()
+    assert not instance.check(Operation.READ_EXISTING).allowed
+    assert instance.check(Operation.SESSION_OR_MANAGEMENT).allowed
+
+
+def test_internal_auth_always_needs_identity_in_development(tmp_path):
+    instance = LicenseRuntime(
+        profile=ICP_DIAG,
+        service="ai",
+        paths=RuntimePaths(tmp_path),
+        trusted_keys={},
+        mode=BuildMode.DEVELOPMENT,
+    )
+    assert instance.status().state == RuntimeState.DEVELOPMENT
+    with pytest.raises(OSError):
+        from license_sdk.proofs import ICP_CONTROL
+
+        instance.control_proof(config=ICP_CONTROL)

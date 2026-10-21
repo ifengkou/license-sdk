@@ -19,3 +19,34 @@ were discarded. Fixtures are excluded from core runtime JARs/wheels and customer
 See Java/Python READMEs and `tools/verify_phase2_cross_language.py` for actual verification.
 Recovery codes are implemented, but recovery signing/application, runtime clocks and execution
 enforcement remain pending.
+## Internal CONTROL proof v1 (SDK 0.4.0)
+
+CONTROL is a dedicated HS256 compact JWS, independent of user JWT authentication.
+The product assembly supplies the fixed issuer, audience and key domain. For ICP
+Diag, derive the 32-byte key as HMAC-SHA256(installation master key,
+UTF-8 `icp-diag/control/v1`); issuer is `icp-diag/metor`, audience is
+`icp-diag/ai-internal`. Never accept caller-selected key domains or public-key URLs.
+
+The header contains exactly `alg=HS256` and `typ=JWT`. Claims contain exactly
+`iss`, `aud`, `installation_id`, `purpose=CONTROL`, `scope`, `iat`, `exp`, `jti`,
+`http_method`, `http_path`, `body_sha256`. Installation and token identifiers are
+canonical UUIDv4 values. `iat` and `exp` are nonnegative signed 64-bit UTC epoch
+seconds; the lifetime is 1–60 seconds. Five seconds of transport skew are allowed;
+the upper bound is exclusive (`now < exp + 5`). Commercial PERPETUAL does not
+remove this transport limit.
+
+Scopes `LICENSE_STATUS` and `LICENSE_VALIDATE` bind respectively to empty-body
+`GET /internal/license/status` and exact original-file-body
+`POST /internal/license/validate`. The request body digest is lowercase SHA-256.
+The token is limited to 8192 characters, decoded header to 512 bytes, decoded
+claims to 4096 bytes and body to 65536 bytes. Duplicate/unknown fields, algorithm
+changes, invalid types and noncanonical unpadded Base64URL are rejected.
+Identical short-window transport retries remain allowed; CONTROL cannot stand
+in for the future TASK proof or grant background execution admission.
+
+Candidate preflight uses actual UTC and never replaces the active license or
+saves clock checkpoints. Candidate acceptability and current clock restrictions
+are separate results. Product adapters retain administrator authorization,
+whole-file digest concurrency control, dual preflight and publication semantics.
+Conformance: `tools/verify_phase4_control.py` uses an independent standard-library
+HMAC oracle plus actual Java/Python issuance and verification.

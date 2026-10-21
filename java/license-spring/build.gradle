@@ -1,4 +1,14 @@
-dependencies { api project(':license-core') }
-
-// The Phase 1 adapter deliberately has no public classes to document.
-tasks.named('javadoc') { enabled = false }
+dependencies {
+    api project(':license-core')
+    implementation 'com.nimbusds:nimbus-jose-jwt:9.37.4'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.8'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.12.2'
+}
+tasks.register('writeRuntimeClasspath') {
+    inputs.property('releaseVersion', project.version.toString())
+    dependsOn tasks.named('jar'), project(':license-core').tasks.named('jar')
+    def target = layout.buildDirectory.file('runtime-classpath.txt')
+    outputs.file(target)
+    doLast { target.get().asFile.text = files(tasks.named('jar').get().archiveFile, configurations.runtimeClasspath).asPath }
+}
