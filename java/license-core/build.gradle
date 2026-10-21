@@ -6,3 +6,14 @@ dependencies {
 
 // Synthetic signing trust is available to tests only, never the runtime JAR.
 sourceSets.test.resources.srcDir('../../protocol/test-fixtures')
+
+// Standalone conformance drivers consume the built runtime, without test dependencies.
+tasks.register('writeRuntimeClasspath') {
+    dependsOn tasks.named('jar')
+    def target = layout.buildDirectory.file('runtime-classpath.txt')
+    outputs.file(target)
+    doLast {
+        target.get().asFile.text = files(tasks.named('jar').get().archiveFile,
+            configurations.runtimeClasspath).asPath
+    }
+}

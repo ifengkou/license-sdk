@@ -1,13 +1,14 @@
 {
-  "sdk_version": "0.1.0",
-  "status": "phase-1-scaffold-not-production-license",
+  "sdk_version": "0.2.0",
+  "status": "phase-2-commercial-verification-no-runtime-enforcement",
   "implemented_protocols": [
     "IC1",
     "RC1J",
-    "RC1A"
+    "RC1A",
+    "commercial-license-v1"
   ],
   "commercial_license_schema_version": 1,
-  "commercial_license_implemented": false,
+  "commercial_license_implemented": true,
   "profile_versions": {
     "icp-diag": 1
   },
@@ -22,5 +23,6 @@
     "sha256": "ec54855dc0d7f19ee28e8eb81fa47f3aee81087df39d82266de2f1360ac34a2b",
     "included_in_runtime_artifacts": false,
     "verification_command": "python3 license-sdk/tools/verify_signature_vectors.py"
-  }
+  },
+  "runtime_clock_and_enforcement_implemented": false
 }

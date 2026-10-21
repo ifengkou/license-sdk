@@ -1,4 +1,4 @@
-# Protocol v1 scaffold
+# Protocol v1
 
 `request-code-v1-vectors.json` 是从已确认设计复制的合成向量原件。Java/Python 核心制品必须分别内嵌完全相同的资源文件，构建及测试校验 SHA-256，不依赖工作区 `.agents`。
 
@@ -6,4 +6,16 @@ IC1、RC1J、RC1A 编码：20 字节摘要后附 CRC16-XMODEM（poly=0x1021，in
 
 IC1 摘要由产品配置的 host-fingerprint 和 host-install 域、真实 machine-id 及 UUIDv4 计算；恢复摘要覆盖产品恢复域、安装 UUID、服务、nonce 与冻结状态指纹。通用算法接收显式域配置，ICP 配置不能成为其他产品的默认身份。输入码最长 256 字符，不进行通用 Unicode 规范化。machine-id 只移除一个末尾 LF，不进行通用 trim；CRLF、额外换行和空格拒绝，必须是非零的 32 位小写十六进制。
 
-Phase 1 不包含 SDK 商业许可签名/验签实现或生产信任材料。`test-fixtures/` 提供四种组合的纯测试签名样例及 SPKI 公钥，生成用临时私钥已丢弃；它不打入运行 JAR/wheel，也不进入客户信任。JDK 独立验证样例签名，完整 SDK 验签及第二产品签名隔离在 Phase 2 验证；本目录的未签名字段组合不等于合法许可。
+Phase 2 implements strict commercial-v1 verification in both SDK cores. The envelope contains
+only payload/signature. Limits are 64 KiB for the envelope, 32 KiB for payload, and depth8.
+Duplicates, unknown fields, wrong types, floats/nonstandard numbers, noncanonical unpadded
+Base64URL, invalid UTF-8, control characters and lone surrogates are rejected. Signatures
+cover original payload bytes. TERM uses not_before <= now < expires_at; PERPETUAL requires
+explicit null expires_at. HOST_INSTALL requires matching local binding; UNBOUND requires
+explicit null binding fields. Trust comes only from fixed product assembly.
+
+`test-fixtures/` contains synthetic signatures and public SPKI only; temporary generation keys
+were discarded. Fixtures are excluded from core runtime JARs/wheels and customer trust.
+See Java/Python READMEs and `tools/verify_phase2_cross_language.py` for actual verification.
+Recovery codes are implemented, but recovery signing/application, runtime clocks and execution
+enforcement remain pending.
