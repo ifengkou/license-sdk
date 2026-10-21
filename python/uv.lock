@@ -328,7 +328,7 @@ wheels = [
 
 [[package]]
 name = "metor-license-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -353,7 +353,7 @@ dev = [
 
 [[package]]
 name = "metor-license-fastapi"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "fastapi" }
 dependencies = [
     { name = "fastapi" },

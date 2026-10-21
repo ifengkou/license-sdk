@@ -2,13 +2,13 @@
 
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal
-SDK development only; published adapter metadata pins `metor-license-core==0.2.0`.
+SDK development only; published adapter metadata pins `metor-license-core==0.3.0`.
 
 Phase 1 implements product profiles, host/install binding digests, manual request/recovery
 code codecs, packaged public vectors, an admission protocol and a thin FastAPI adapter.
 Phase 2 adds strict commercial payload validation, raw-byte Ed25519 verification and
-TERM/PERPETUAL × HOST_INSTALL/UNBOUND evaluation. It does not yet implement runtime
-admission rules, persistent clock state or recovery application. The adapter requires an injected guard; no permissive default
+TERM/PERPETUAL × HOST_INSTALL/UNBOUND evaluation. Phase 3 adds strict installation/clock observation and durable monotonic clock protection.
+It does not yet implement execution admission or recovery application. The adapter requires an injected guard; no permissive default
 runtime is provided. It must run after host authentication; hosts retain operation semantics.
 
 Run `uv sync --all-packages` once, then `uv lock --check`, `uv run --locked ruff check .`,
@@ -29,3 +29,23 @@ requires the locally recomputed lowercase binding digest.
 for vendor-side payload construction. Its result is not evidence of signature validity.
 `parse_json_object` and `parse_utc_timestamp` share the same strict bounded wire rules with
 request handling. All protocol errors carry a `LicenseValidationError.reason` category.
+
+Phase 3 public runtime lives in `license_sdk.runtime`. Construct `LicenseRuntime` with an
+explicit `ProductProfile`, service, `RuntimePaths`, build mode and immutable trusted key
+mapping. `status(force_checkpoint=True)` provides the persistence seam for future execution
+admission; it is not itself a task guard. The product lifecycle must invoke a checkpoint at
+least every 30 seconds, independently of status requests. Missing/corrupt identity or clock
+never initializes replacement state, and integrity or commit failures remain sticky until
+controlled recovery in a later phase. Development mode never touches local installation files.
+
+`RuntimeStatus` preserves ordered reasons, primary state, operating mode, current effective
+time, and verified commercial payload/digests. Each status observes current license bytes
+and current clock integrity; it does not retain an ACTIVE result across missing/tampered files.
+UNBOUND never reads machine-id. HOST_INSTALL recomputes the actual local binding.
+
+`encode_clock` and `decode_clock` implement the v1 raw-byte HMAC envelope with signed 64-bit
+nonnegative counters and 8 KiB/4 KiB envelope/payload bounds. Public synthetic clock vectors
+are packaged as `license_sdk/data/clock-state-v1-vectors.json`; they are test material only.
+The core uses POSIX file locks, no-follow regular file reads and atomic same-directory replace
+with file/directory fsync. Production is Linux; tests also run on macOS. It does not provide
+Windows locking fallbacks or claim cross-service atomic transactions.

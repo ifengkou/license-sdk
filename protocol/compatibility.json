@@ -1,6 +1,6 @@
 {
-  "sdk_version": "0.2.0",
-  "status": "phase-2-commercial-verification-no-runtime-enforcement",
+  "sdk_version": "0.3.0",
+  "status": "phase-3-runtime-clock-no-business-enforcement",
   "implemented_protocols": [
     "IC1",
     "RC1J",
@@ -24,5 +24,11 @@
     "included_in_runtime_artifacts": false,
     "verification_command": "python3 license-sdk/tools/verify_signature_vectors.py"
   },
-  "runtime_clock_and_enforcement_implemented": false
+  "runtime_clock_and_enforcement_implemented": false,
+  "runtime_clock_implemented": true,
+  "business_enforcement_implemented": false,
+  "clock_vectors": {
+    "file": "clock-state-v1-vectors.json",
+    "sha256": "05c10295929091cbdb60d51d751d3f331947c5147f8e1785d1aaa4c877c4ee11"
+  }
 }

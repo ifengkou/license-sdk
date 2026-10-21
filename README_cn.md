@@ -1,8 +1,8 @@
 # License SDK 中文说明
 
-通用离线软件授权 SDK，独立于业务工程维护，提供 Java 和 Python 实现。当前版本为 `0.2.0`，许可文件协议为 `schema_version = 1`；SDK 发行版本与文件协议版本分别管理。
+通用离线软件授权 SDK，独立于业务工程维护，提供 Java 和 Python 实现。当前版本为 `0.3.0`，许可文件协议为 `schema_version = 1`；SDK 发行版本与文件协议版本分别管理。
 
-当前已完成第二阶段的商业许可解析与验签。持久化时间保护、恢复应用及业务请求／任务拦截仍待后续阶段完成，现阶段不能直接作为完整的客户授权发行方案。
+当前已完成第三阶段的商业许可验签、安装身份观察和持久化时间保护。恢复应用及业务请求／任务拦截仍待后续阶段完成，现阶段不能直接作为完整的客户授权发行方案。
 
 ## 项目职责
 
@@ -42,7 +42,7 @@ SDK 会随客户运行制品交付，依赖包不能保证抵抗反编译或程�
 | [examples/](examples/README.md) | 最小宿主调用说明 |
 | `tools/` | 编码及真实签发文件的跨语言验证工具 |
 
-Java 暂用坐标为 `io.metor.license:license-core:0.2.0` 和 `io.metor.license:license-spring:0.2.0`。Python 分发名为 `metor-license-core`、`metor-license-fastapi`。正式发布组织及受控仓库地址尚待配置，当前未发布至远程制品仓库。
+Java 暂用坐标为 `io.metor.license:license-core:0.3.0` 和 `io.metor.license:license-spring:0.3.0`。Python 分发名为 `metor-license-core`、`metor-license-fastapi`。正式发布组织及受控仓库地址尚待配置，当前未发布至远程制品仓库。
 
 Java 核心仅依赖 JDK；Jackson/JUnit 仅用于测试。Python 核心依赖 cryptography，当前锁定版本为 `46.0.7`。通用核心不依赖业务工程、Spring 或 FastAPI。
 
@@ -55,7 +55,7 @@ Java 核心仅依赖 JDK；Jackson/JUnit 仅用于测试。Python 核心依赖 c
 ./gradlew :license-core:writeRuntimeClasspath
 ```
 
-核心 JAR 位于 `license-core/build/libs/license-core-0.2.0.jar`。本地发布验证命令为：
+核心 JAR 位于 `license-core/build/libs/license-core-0.3.0.jar`。本地发布验证命令为：
 
 ```sh
 ./gradlew publishAllPublicationsToVerificationRepository
@@ -106,7 +106,7 @@ result = verify_license(
 
 两端返回 `ACTIVE`、`NOT_YET_VALID` 或 `EXPIRED` 状态：生效边界包含，到期边界不包含。验签成功不等于当前可使用，产品必须检查状态。本机绑定应根据真实宿主及安装身份重新计算，不能直接信任申请文件中的摘要。可信公钥应由产品受控装配。
 
-底层验签接口使用调用方提供的身份与时间，不读取运行目录，也不检测持久化时钟异常。Python 的 `validate_commercial_payload` 仅验证未签名载荷结构，其结果不能作为签名有效的证据。
+底层验签接口使用调用方提供的身份与时间，不读取运行目录。第三阶段新增的 `LicenseRuntime` 独立观察身份、当前许可及 HMAC 时间状态，结合 UTC 与单调时钟检测超过 300 秒的回拨；期限判断每次执行，不把容差作为到期宽限。运行时不自动生成缺失身份或时间种子。产品生命周期每 30 秒保存检查点，未来执行准入须先强制持久化。Python 的 `validate_commercial_payload` 仅验证未签名载荷结构，其结果不能作为签名有效的证据。
 
 ## 框架接入与验证范围
 
@@ -119,3 +119,5 @@ license-issuer/.venv/bin/python license-sdk/tools/verify_phase2_cross_language.p
 ```
 
 工具使用临时合成密钥，覆盖异常载荷、期限边界、四种许可组合、文件／手抄申请、重试及跨产品隔离。测试信任与签发入口不进入 SDK 运行制品。当前验证不能替代 Linux AMD64 整栈离线交付验收。
+
+时间种子协议及正负向量见 `protocol/clock-state-v1-vectors.json`。独立核对命令为 `python tools/verify_phase3_cross_language.py`（在安装核心 SDK 的环境中，从本 SDK 根目录执行，先构建 Java 制品）。Java/Python 对标准库生成的种子进行解析与规范输出，并验证到期、回拨、损坏和重启。

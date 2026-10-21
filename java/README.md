@@ -1,7 +1,7 @@
-# Java license SDK — Phase 2
+# Java license SDK — Phase 3
 
 Java 21 standalone Gradle project. Provisional local coordinates are
-`io.metor.license:license-core:0.2.0` and `io.metor.license:license-spring:0.2.0`.
+`io.metor.license:license-core:0.3.0` and `io.metor.license:license-spring:0.3.0`.
 These names are not a confirmed organization namespace or a remote publication.
 The Gradle 8.14 wrapper is copied unchanged from the existing Metor wrapper.
 
@@ -29,8 +29,9 @@ Implemented:
 
 `license-spring` is only a separately publishable adapter skeleton depending on
 core. It has no Spring dependency, filter, auto-configuration or enforcement yet.
-No persistent license state, signing, private-key handling, clock
-protection or business integration is implemented yet. A decoded manual
+Phase 3 adds `ClockStateCodec`, `LicenseRuntime`, `TimeSource` and atomic `StateStore`
+for installation observation and durable UTC/monotonic rollback protection. No signing,
+private-key handling, recovery application or business enforcement is implemented yet. A decoded manual
 code is an identity/checksum value, never authorization.
 
 ```sh
@@ -38,19 +39,19 @@ code is an identity/checksum value, never authorization.
 ```
 
 The `examples/StandaloneCodec.java` smoke uses only the built core JAR and JDK 21.
-Copy that source and `license-core/build/libs/license-core-0.2.0.jar` into an empty
+Copy that source and `license-core/build/libs/license-core-0.3.0.jar` into an empty
 directory, then run:
 
 ```sh
-javac -cp license-core-0.2.0.jar StandaloneCodec.java
-java -cp license-core-0.2.0.jar:. StandaloneCodec
+javac -cp license-core-0.3.0.jar StandaloneCodec.java
+java -cp license-core-0.3.0.jar:. StandaloneCodec
 ```
 
 For local publication verification, run
 `./gradlew publishAllPublicationsToVerificationRepository`. This writes both
 versioned Maven publications to `build/maven-repository`, never a remote registry.
-A detached consumer may resolve `io.metor.license:license-spring:0.2.0` from a copy
-of that directory; its POM pins `license-core:0.2.0` transitively. The copied
+A detached consumer may resolve `io.metor.license:license-spring:0.3.0` from a copy
+of that directory; its POM pins `license-core:0.3.0` transitively. The copied
 repository is sufficient without any SDK source or business checkout.
 
 No build uses sibling business source or `.agents` files. Gradle needs its pinned
