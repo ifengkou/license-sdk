@@ -64,7 +64,7 @@ public class Phase3RuntimeProbe {
     for (String line; (line = input.readLine()) != null;) {
       String[] p = line.split("\t");
       clock.wall = Instant.parse(p[0]); clock.mono = Long.parseLong(p[1]);
-      var result = p[2].equals("true") ? runtime.beforeExecution() : runtime.status();
+      var result = p[2].equals("true") ? runtime.checkpoint() : runtime.inspect();
       System.out.println(result.state().name());
       System.out.flush();
     }
@@ -149,7 +149,7 @@ public class Phase3RuntimeProbe {
         def check(wall, mono, expected, force=False):
             nonlocal count
             clock.wall, clock.mono = start + timedelta(seconds=wall), int(mono * 1_000_000_000)
-            actual = runtime.status(force_checkpoint=force).state.value
+            actual = (runtime.checkpoint() if force else runtime.status(read_only=True)).state.value
             assert actual == expected, (scenario, "Python", actual, expected)
             assert process.stdin is not None and process.stdout is not None
             instant = clock.wall.isoformat().replace("+00:00", "Z")
@@ -173,18 +173,19 @@ public class Phase3RuntimeProbe {
                 check(19.999999, 19.999999, "ACTIVE")
                 check(20, 20, "EXPIRED")
             elif scenario == "boundary":
-                check(-300, 0, "ACTIVE")
-                check(-300.000001, 0, "CLOCK_ROLLBACK")
+                check(-86399, 0, "ACTIVE")
+                check(-86400, 0, "ACTIVE")
+                check(-86401, 0, "CLOCK_ROLLBACK")
                 check(1, 1, "ACTIVE")
             elif scenario == "cumulative":
-                check(-60, 60, "ACTIVE")
-                check(-120, 120, "ACTIVE")
-                check(-180, 180, "CLOCK_ROLLBACK")
+                check(-14_400, 14_400, "ACTIVE")
+                check(-28_800, 28_800, "ACTIVE")
+                check(-43_201, 43_200, "CLOCK_ROLLBACK")
             elif scenario in ("damage", "future"):
                 mutate("state/metor/clock.json", b"{}")
                 check(0, 1, "CLOCK_STATE_INVALID")
                 if scenario == "future":
-                    assert runtime.status().mode == "MANAGEMENT_ONLY"
+                    assert runtime.status().mode == "RESTRICTED"
                 mutate("shared/active.license.json", None)
                 check(0, 2, "UNLICENSED")
             elif scenario == "cache":
@@ -224,7 +225,7 @@ public class Phase3RuntimeProbe {
                     mode=BuildMode.CUSTOMER_REQUIRED,
                     time_source=clock,
                 )
-                check(-261, 0, "CLOCK_ROLLBACK")
+                check(-86_361, 0, "CLOCK_ROLLBACK")
         finally:
             if process.stdin is not None and not process.stdin.closed:
                 process.stdin.close()
@@ -250,7 +251,7 @@ def main() -> None:
     sdk = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--java-jar", type=Path, default=sdk / "java/license-core/build/libs/license-core-0.4.0.jar"
+        "--java-jar", type=Path, default=sdk / "java/license-core/build/libs/license-core-0.6.0.jar"
     )
     jar = parser.parse_args().java_jar.resolve()
     master = bytes(range(32))  # Synthetic installation key, never production trust.

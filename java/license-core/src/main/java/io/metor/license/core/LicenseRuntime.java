@@ -17,11 +17,18 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-/** Local state observation and durable time protection. This class installs no request/business gate. */
-public final class LicenseRuntime {
+/** Local license validation and durable time protection, independent of business routes. */
+public final class LicenseRuntime implements LicenseGuard {
     public record Config(String productId, String service, String fingerprintDomain, String bindingDomain,
         String recoveryDomain, Path identityFile, Path serviceKeyFile, Path licenseFile, Path clockFile,
-        Path machineIdFile) { }
+        Path machineIdFile, String recoveryPrefix) {
+        public Config(String productId, String service, String fingerprintDomain, String bindingDomain,
+            String recoveryDomain, Path identityFile, Path serviceKeyFile, Path licenseFile, Path clockFile,
+            Path machineIdFile) {
+            this(productId, service, fingerprintDomain, bindingDomain, recoveryDomain, identityFile,
+                serviceKeyFile, licenseFile, clockFile, machineIdFile, null);
+        }
+    }
     public enum State {
         CONFIG_INVALID, UNLICENSED, INVALID, CLOCK_STATE_INVALID, CLOCK_ROLLBACK,
         NOT_YET_VALID, EXPIRED, ACTIVE
@@ -36,6 +43,7 @@ public final class LicenseRuntime {
     private final StateStore store;
     private final TimeSource time;
     private final CommercialLicenseVerifier verifier;
+    private final Map<String, PublicKey> trustRing;
     private final IdentityDerivation derivation;
     private final boolean configured;
     private UUID installationId;
@@ -47,6 +55,7 @@ public final class LicenseRuntime {
     private long anchorNanos;
     private long checkpointNanos;
     private boolean persistenceFailed;
+    private UUID invalidatedChallengeNonce;
     private CommercialLicenseVerifier.VerifiedLicense cached;
 
     public LicenseRuntime(Config config, Map<String, PublicKey> trustRing, TimeSource time) {
@@ -59,6 +68,7 @@ public final class LicenseRuntime {
         this.store = Objects.requireNonNull(store, "store");
         CommercialLicenseVerifier candidateVerifier = null;
         IdentityDerivation candidateDerivation = null;
+        Map<String, PublicKey> candidateTrust = Map.of();
         boolean valid;
         try {
             if (trustRing.isEmpty() || !config.service().matches("[a-z][a-z0-9-]{0,31}")) {
@@ -70,10 +80,12 @@ public final class LicenseRuntime {
             Objects.requireNonNull(config.clockFile());
             candidateVerifier = new CommercialLicenseVerifier(config.productId(), trustRing);
             candidateDerivation = new IdentityDerivation(config.fingerprintDomain(), config.bindingDomain(), config.recoveryDomain());
+            candidateTrust = Map.copyOf(trustRing);
             valid = true;
         } catch (IllegalArgumentException | NullPointerException error) { valid = false; }
         verifier = candidateVerifier;
         derivation = candidateDerivation;
+        this.trustRing = candidateTrust;
         configured = valid;
     }
 
@@ -83,8 +95,13 @@ public final class LicenseRuntime {
     /** Called by a process lifecycle timer even while there are no incoming requests. */
     public synchronized Snapshot checkpoint() { return observe(true); }
 
-    /** Force durable reference before a future execution gate admits new work. Does not itself admit work. */
-    public synchronized Snapshot beforeExecution() { return observe(true); }
+    /** Validate without persisting a checkpoint on the request path. */
+    @Override public synchronized void requireValid() {
+        Snapshot current = observe(false, false);
+        if (current.state() != State.ACTIVE) {
+            throw new LicenseDeniedException(current.state(), current.reasons());
+        }
+    }
 
     /** Candidate verification uses actual UTC and never reads or writes the clock state. */
     public synchronized CommercialLicenseVerifier.VerifiedLicense preflight(byte[] candidate) throws IOException {
@@ -111,6 +128,185 @@ public final class LicenseRuntime {
     /** Diagnostic snapshot for a candidate transaction: never checkpoints or replaces files. */
     public synchronized Snapshot inspect() { return observe(false, false); }
 
+    /** Repeated calls return the same persisted request while this service's anomaly is unchanged. */
+    public synchronized RecoveryRequest getOrCreateRecoveryRequest() {
+        Installation identity = recoveryIdentity();
+        try {
+            new ManualCodeCodec(config.recoveryPrefix());
+        } catch (IllegalArgumentException | NullPointerException error) {
+            throw new RecoveryException(RecoveryException.Code.CONFIG_INVALID);
+        }
+        Instant wall = time.utcNow();
+        long mono = time.monotonicNanos();
+        try {
+            return store.withLock(clockLock(), () -> {
+                Snapshot current = lockedObserve(identity, wall, mono, false, false);
+                String reason = recoveryReason(current);
+                if (reason == null) throw new RecoveryException(RecoveryException.Code.NOT_REQUIRED);
+                byte[] raw = optionalRead(config.clockFile());
+                String stateIdentity = stateIdentity(raw);
+                Long epoch = baseEpoch(validClock(raw, identity));
+                byte[] previous = optionalRead(challengeFile());
+                if (previous != null) {
+                    try {
+                        var challenge = RecoveryChallengeCodec.decode(previous, identity.key(), config.productId(),
+                            identity.id(), config.service());
+                        if (!challenge.nonce().equals(invalidatedChallengeNonce)
+                            && challenge.stateIdentity().equals(stateIdentity) && applicableEpoch(challenge.baseEpoch(), epoch)) {
+                            confirmRequest(previous);
+                            return RecoveryChallengeCodec.request(challenge, derivation, config.recoveryPrefix());
+                        }
+                    } catch (IllegalArgumentException error) { /* A damaged challenge is replaced, never trusted. */ }
+                }
+                var challenge = new RecoveryChallengeCodec.Challenge(config.productId(), identity.id(), config.service(),
+                    UUID.randomUUID(), reason, stateIdentity, epoch, wall.truncatedTo(ChronoUnit.SECONDS));
+                byte[] encoded = RecoveryChallengeCodec.encode(challenge, identity.key());
+                StateStore.CommitOutcome outcome = store.replaceRecovery(challengeFile(), previous, encoded);
+                if (outcome == StateStore.CommitOutcome.NOT_COMMITTED) throw storageFailure();
+                if (outcome != StateStore.CommitOutcome.COMMITTED) {
+                    throw new RecoveryException(RecoveryException.Code.OUTCOME_UNKNOWN);
+                }
+                return RecoveryChallengeCodec.request(challenge, derivation, config.recoveryPrefix());
+            });
+        } catch (IOException | IllegalArgumentException | UnsupportedOperationException error) { throw storageFailure(); }
+    }
+
+    /** The same runtime commits and refreshes the local clock; business execution never holds this lock. */
+    public synchronized RecoveryResult applyRecovery(byte[] signedFile) {
+        Installation identity = recoveryIdentity();
+        var recovery = new RecoveryVerifier(config.productId(), trustRing).verify(signedFile, identity.id(), config.service());
+        Instant wall = time.utcNow();
+        long mono = time.monotonicNanos();
+        try {
+            return store.withLock(clockLock(), () -> {
+                byte[] raw = optionalRead(config.clockFile());
+                ClockState clock = validClock(raw, identity);
+                if (clock != null && recovery.recoveryId().equals(clock.lastRecoveryId())) {
+                    if (observedClock != null && (clock.epoch() < observedClock.epoch()
+                        || clock.epoch() == observedClock.epoch() && (clock.sequence() < observedClock.sequence()
+                        || clock.highWatermark().isBefore(observedClock.highWatermark())))) {
+                        throw new RecoveryException(RecoveryException.Code.TARGET_CHANGED);
+                    }
+                    StateStore.CommitOutcome outcome = store.confirmDurability(config.clockFile(), raw);
+                    if (outcome != StateStore.CommitOutcome.COMMITTED) return unknownRecovery(identity, wall, recovery.recoveryId());
+                    boolean adopt = observedClock == null || clock.epoch() > observedClock.epoch();
+                    refreshClock(clock, raw, wall, mono, adopt);
+                    cleanupChallenge();
+                    return new RecoveryResult(RecoveryResult.ActionStatus.ALREADY_APPLIED,
+                        lockedObserve(identity, wall, mono, false, false), recovery.recoveryId());
+                }
+                if (wall.isBefore(recovery.windowStart()) || !wall.isBefore(recovery.windowEnd())) {
+                    throw new RecoveryException(RecoveryException.Code.WINDOW_INVALID);
+                }
+                Snapshot current = lockedObserve(identity, wall, mono, false, false);
+                String reason = recoveryReason(current);
+                if (reason == null) throw new RecoveryException(RecoveryException.Code.TARGET_CHANGED);
+                // Observation can latch errors but may not rewrite the clock during recovery comparison.
+                raw = optionalRead(config.clockFile());
+                clock = validClock(raw, identity);
+                byte[] challengeBytes = optionalRead(challengeFile());
+                RecoveryChallengeCodec.Challenge challenge;
+                try {
+                    if (challengeBytes == null) throw new IllegalArgumentException();
+                    challenge = RecoveryChallengeCodec.decode(challengeBytes, identity.key(), config.productId(), identity.id(), config.service());
+                } catch (IllegalArgumentException error) { throw new RecoveryException(RecoveryException.Code.TARGET_CHANGED); }
+                if (challenge.nonce().equals(invalidatedChallengeNonce) || !challenge.stateIdentity().equals(stateIdentity(raw))
+                    || !applicableEpoch(challenge.baseEpoch(), baseEpoch(clock))) {
+                    throw new RecoveryException(RecoveryException.Code.TARGET_CHANGED);
+                }
+                String target = HexFormat.of().formatHex(derivation.recoveryTarget(identity.id(), config.service(),
+                    challenge.nonce(), HexFormat.of().parseHex(challenge.stateIdentity())));
+                if (!target.equals(recovery.targetId())) throw new RecoveryException(RecoveryException.Code.TARGET_CHANGED);
+                Long base = challenge.baseEpoch();
+                long epoch;
+                try { epoch = base == null ? 1 : Math.addExact(base, 1); }
+                catch (ArithmeticException error) { throw storageFailure(); }
+                ClockState updated = new ClockState(config.productId(), identity.id(), config.service(), epoch,
+                    0, wall.truncatedTo(ChronoUnit.SECONDS), recovery.recoveryId());
+                byte[] encoded = ClockStateCodec.encode(updated, identity.key());
+                StateStore.CommitOutcome outcome = store.replaceRecovery(config.clockFile(), raw, encoded);
+                if (outcome == StateStore.CommitOutcome.NOT_COMMITTED) throw storageFailure();
+                if (outcome != StateStore.CommitOutcome.COMMITTED) return unknownRecovery(identity, wall, recovery.recoveryId());
+                refreshClock(updated, encoded, wall, mono, true);
+                cleanupChallenge();
+                return new RecoveryResult(RecoveryResult.ActionStatus.APPLIED,
+                    lockedObserve(identity, wall, mono, false, false), recovery.recoveryId());
+            });
+        } catch (IOException | IllegalArgumentException | UnsupportedOperationException error) { throw storageFailure(); }
+    }
+
+    private Installation recoveryIdentity() {
+        if (!configured) throw new RecoveryException(RecoveryException.Code.CONFIG_INVALID);
+        try { return identity(); }
+        catch (IOException | IllegalArgumentException error) { throw new RecoveryException(RecoveryException.Code.CONFIG_INVALID); }
+    }
+    private byte[] optionalRead(Path path) throws IOException {
+        try { return store.read(path, 8192); }
+        catch (NoSuchFileException missing) { return null; }
+    }
+    private ClockState validClock(byte[] raw, Installation identity) {
+        if (raw == null) return null;
+        try { return ClockStateCodec.decode(raw, identity.key(), config.productId(), identity.id(), config.service()); }
+        catch (IllegalArgumentException error) { return null; }
+    }
+    private Long baseEpoch(ClockState disk) {
+        if (observedClock == null) return disk == null ? null : disk.epoch();
+        return disk == null ? observedClock.epoch() : Math.max(disk.epoch(), observedClock.epoch());
+    }
+    private static boolean applicableEpoch(Long challenged, Long known) {
+        return known == null || challenged != null && challenged >= known;
+    }
+    private static String stateIdentity(byte[] raw) {
+        return digest(raw == null ? "MISSING".getBytes(StandardCharsets.US_ASCII) : raw);
+    }
+    private static String recoveryReason(Snapshot current) {
+        if (current.reasons().contains("CLOCK_STATE_INVALID")) return "CLOCK_STATE_INVALID";
+        return current.reasons().contains("CLOCK_ROLLBACK") ? "CLOCK_ROLLBACK" : null;
+    }
+    private void confirmRequest(byte[] raw) throws IOException {
+        StateStore.CommitOutcome confirmed = store.confirmDurability(challengeFile(), raw);
+        if (confirmed == StateStore.CommitOutcome.NOT_COMMITTED) throw storageFailure();
+        if (confirmed != StateStore.CommitOutcome.COMMITTED) throw new RecoveryException(RecoveryException.Code.OUTCOME_UNKNOWN);
+    }
+    private RecoveryResult unknownRecovery(Installation identity, Instant wall, UUID recoveryId) {
+        persistenceFailed = true;
+        return new RecoveryResult(RecoveryResult.ActionStatus.OUTCOME_UNKNOWN,
+            withoutClock(identity, wall, "CLOCK_STATE_INVALID"), recoveryId);
+    }
+    private void refreshClock(ClockState clock, byte[] raw, Instant wall, long mono, boolean allowLowerReference) {
+        Instant retained = max(clock.highWatermark(), wall);
+        if (!allowLowerReference) {
+            if (high != null) retained = max(retained, high);
+            if (anchor != null && mono >= anchorNanos) retained = max(retained, anchor.plusNanos(mono - anchorNanos));
+        }
+        observedClock = clock;
+        observedClockDigest = digest(raw);
+        high = retained;
+        anchor = retained;
+        anchorNanos = checkpointNanos = mono;
+        persistenceFailed = false;
+    }
+    private void cleanupChallenge() {
+        try { store.deleteRecoveryChallenge(challengeFile()); }
+        catch (IOException error) { System.getLogger(LicenseRuntime.class.getName())
+            .log(System.Logger.Level.WARNING, "Recovery committed; challenge cleanup failed"); }
+    }
+    private void invalidateApplicableChallenge(Installation identity, String clockDigest) throws IOException {
+        byte[] raw = optionalRead(challengeFile());
+        if (raw == null) return;
+        boolean applicable;
+        try {
+            var challenge = RecoveryChallengeCodec.decode(raw, identity.key(), config.productId(), identity.id(), config.service());
+            applicable = challenge.stateIdentity().equals(clockDigest);
+            if (applicable) invalidatedChallengeNonce = challenge.nonce();
+        } catch (IllegalArgumentException malformed) { applicable = false; }
+        if (applicable) store.deleteRecoveryChallenge(challengeFile());
+        else cleanupChallenge(); // Consumed or malformed challenges cannot authorize the current clock.
+    }
+    private Path challengeFile() { return config.clockFile().resolveSibling("recovery-challenge.json"); }
+    private Path clockLock() { return config.clockFile().resolveSibling(config.clockFile().getFileName() + ".lock"); }
+    private static RecoveryException storageFailure() { return new RecoveryException(RecoveryException.Code.STORAGE_FAILED); }
+
     private Snapshot observe(boolean force) { return observe(force, true); }
 
     private Snapshot observe(boolean force, boolean writable) {
@@ -124,8 +320,7 @@ public final class LicenseRuntime {
             return snapshot(State.CONFIG_INVALID, List.of("CONFIG_INVALID"), null, wall, wall);
         }
         try {
-            Path lock = config.clockFile().resolveSibling(config.clockFile().getFileName() + ".lock");
-            return store.withLock(lock, () -> lockedObserve(identity, wall, mono, force, writable));
+            return store.withLock(clockLock(), () -> lockedObserve(identity, wall, mono, force, writable));
         } catch (IOException | IllegalArgumentException | UnsupportedOperationException error) {
             persistenceFailed = true;
             return withoutClock(identity, wall, "CLOCK_STATE_INVALID");
@@ -168,12 +363,18 @@ public final class LicenseRuntime {
             return withoutClock(identity, wall, "CLOCK_STATE_INVALID");
         }
         Instant effective = max(wall, reference);
-        boolean rollback = wall.plusSeconds(300).isBefore(reference);
+        boolean rollback = wall.plusSeconds(86_400).isBefore(reference);
         List<String> reasons = new ArrayList<>();
         CommercialLicenseVerifier.VerifiedLicense license = license(identity, effective, reasons);
         if (rollback) { reasons.add("CLOCK_ROLLBACK"); }
         if (!rollback) {
             high = effective;
+            try {
+                invalidateApplicableChallenge(identity, clockDigest);
+            } catch (IOException error) {
+                persistenceFailed = true;
+                reasons.add("CLOCK_STATE_INVALID");
+            }
             if (writable && (force || mono - checkpointNanos >= 30_000_000_000L)) {
                 try {
                     ClockState update = new ClockState(config.productId(), identity.id(), config.service(),

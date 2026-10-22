@@ -19,12 +19,24 @@ from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from license_sdk.contracts import Admission, Operation
+from license_sdk.guard import LicenseDeniedError
 from license_sdk.identity import binding_id, host_fingerprint, installation_uuid
 from license_sdk.profile import ProductProfile
 from license_sdk.proofs import ControlProof, ControlProofConfig
+from license_sdk.recovery import (
+    RecoveryError,
+    RecoveryRequest,
+    RecoveryResult,
+    canonical_json,
+    decode_challenge,
+    encode_challenge,
+    parse_recovery_request,
+    state_identity,
+    utc_text,
+    verify_recovery,
+)
 from license_sdk.verification import (
     CommercialLicense,
     LicenseErrorReason,
@@ -134,10 +146,14 @@ class FileStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._mutex = threading.RLock()
+        self._held = False
 
     @contextmanager
     def locked(self) -> Iterator[None]:
         with self._mutex:
+            if self._held:
+                yield
+                return
             _safe_path(self.path)
             lock_path = self.path.with_name("clock.lock")
             fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -145,19 +161,32 @@ class FileStateStore:
                 if not stat.S_ISREG(os.fstat(fd).st_mode):
                     raise ValueError("lock must be regular")
                 fcntl.flock(fd, fcntl.LOCK_EX)
+                self._held = True
                 yield
             finally:
+                self._held = False
                 os.close(fd)
 
     def read(self) -> bytes:
         return read_bounded(self.path, 8192)
 
     def replace(self, expected: bytes, replacement: bytes) -> CommitPhase:
-        # Caller holds locked(). Never create an absent state or overwrite changed state.
+        # Ordinary checkpoints never create an absent state.
+        return self._replace(expected, replacement)
+
+    def replace_recovery(self, expected: bytes | None, replacement: bytes) -> CommitPhase:
+        """Recovery-only CAS, including an explicitly expected absent file."""
+        return self._replace(expected, replacement)
+
+    def _replace(self, expected: bytes | None, replacement: bytes) -> CommitPhase:
         temporary: str | None = None
         published = False
         try:
-            if self.read() != expected:
+            try:
+                current: bytes | None = self.read()
+            except FileNotFoundError:
+                current = None
+            if current != expected:
                 raise ValueError("clock changed before commit")
             fd, temporary = tempfile.mkstemp(prefix=".clock-", dir=self.path.parent)
             with os.fdopen(fd, "wb") as stream:
@@ -185,6 +214,21 @@ class FileStateStore:
                     os.unlink(temporary)
                 except OSError:
                     logging.getLogger(__name__).warning("clock temporary-file cleanup failed")
+
+    def confirm(self, expected: bytes) -> None:
+        """Confirm an already published exact file before reporting durable success."""
+        if self.read() != expected:
+            raise ValueError("state changed before durability confirmation")
+        descriptor = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        descriptor = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 @dataclass(frozen=True)
@@ -314,6 +358,8 @@ class LicenseRuntime:
         self._checkpoint_ns: int | None = None
         self._installation: str | None = None
         self._master: bytes | None = None
+        self._pending_recovery_id: str | None = None
+        self._invalidated_nonce: str | None = None
 
     def _identity(self) -> None:
         data = parse_json_object(read_bounded(self.paths.root / "identity/installation.json", 4096))
@@ -370,7 +416,7 @@ class LicenseRuntime:
                     clock.high_watermark, self._anchor + elapsed, self._last_effective or wall
                 )
                 effective = max(wall, reference, self._last_effective or wall)
-                rollback = wall + timedelta(seconds=300) < reference
+                rollback = wall + timedelta(seconds=86_400) < reference
                 self._clock, self._raw_clock = clock, raw
                 self._last_effective = effective
                 if (
@@ -399,6 +445,8 @@ class LicenseRuntime:
                     self.store.replace(raw, encoded)
                     self._clock, self._raw_clock = updated, encoded
                     self._checkpoint_ns = mono
+                if not rollback:
+                    self._discard_challenge()
                 return effective, rollback
         except (OSError, ValueError, OverflowError):
             self._clock_invalid = True
@@ -483,14 +531,7 @@ class LicenseRuntime:
             )
             reasons.sort(key=priority.index)
             state = reasons[0] if reasons else RuntimeState.ACTIVE
-            restricted_license = verified is None or verified.status == LicenseStatus.NOT_YET_VALID
-            run_mode = (
-                "MANAGEMENT_ONLY"
-                if self._config_invalid or restricted_license
-                else "READ_ONLY"
-                if reasons
-                else "NORMAL"
-            )
+            run_mode = "RESTRICTED" if reasons else "NORMAL"
             return RuntimeStatus(
                 state,
                 tuple(reasons),
@@ -501,15 +542,279 @@ class LicenseRuntime:
                 file_digest,
             )
 
-    def check(self, operation: Operation) -> Admission:
-        """Request-level eligibility only; does not confer task continuation rights."""
-        if operation == Operation.SESSION_OR_MANAGEMENT:
-            return Admission(True, "MANAGEMENT")
-        status = self.status(read_only=True)
-        allowed = status.mode in ("NORMAL", "DEVELOPMENT") or (
-            status.mode == "READ_ONLY" and operation == Operation.READ_EXISTING
-        )
-        return Admission(allowed, status.state.value)
+    def require_valid(self) -> None:
+        """Validate without saving time state on the request path."""
+        current = self.status(read_only=True)
+        if current.state not in (RuntimeState.ACTIVE, RuntimeState.DEVELOPMENT):
+            raise LicenseDeniedError(
+                current.state.value, tuple(reason.value for reason in current.reasons)
+            )
+
+    def checkpoint(self) -> RuntimeStatus:
+        """Called by the process lifecycle timer, independently of incoming requests."""
+        return self.status(force_checkpoint=True)
+
+    @property
+    def _challenge_store(self) -> FileStateStore:
+        return FileStateStore(self.store.path.with_name("recovery-challenge.json"))
+
+    def _discard_challenge(self) -> None:
+        path = self._challenge_store.path
+        _safe_path(path)
+        if not path.exists():
+            return
+        with self.store.locked():
+            applicable = False
+            try:
+                assert self._master is not None
+                request = decode_challenge(
+                    self._challenge_store.read(), self.profile, self.service, self._master
+                )
+                applicable = request.state_identity == state_identity(self._raw_clock)
+                self._invalidated_nonce = request.nonce
+            except (OSError, ValueError):
+                pass
+            try:
+                path.unlink(missing_ok=True)
+                descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+            except OSError:
+                if applicable:
+                    raise
+                logging.getLogger(__name__).warning("stale recovery challenge cleanup failed")
+
+    def _recovery_context(self) -> tuple[bytes | None, ClockState | None, int | None]:
+        try:
+            raw: bytes | None = self.store.read()
+        except FileNotFoundError:
+            raw = None
+        current = None
+        if raw is not None:
+            try:
+                assert self._installation is not None and self._master is not None
+                current = decode_clock(
+                    raw,
+                    product_id=self.profile.product_id,
+                    installation_id=self._installation,
+                    service=self.service,
+                    service_key=self._master,
+                )
+            except ValueError:
+                pass
+        epochs = [clock.epoch for clock in (current, self._clock) if clock is not None]
+        return raw, current, max(epochs) if epochs else None
+
+    def _recovery_ready(self) -> None:
+        self._identity()
+        if self._config_invalid or self.mode != BuildMode.CUSTOMER_REQUIRED:
+            raise RecoveryError("LICENSE_RECOVERY_INVALID")
+
+    def _recovery_reason(self) -> str:
+        current = self.status(read_only=True)
+        if RuntimeState.CLOCK_STATE_INVALID in current.reasons:
+            return "CLOCK_STATE_INVALID"
+        if RuntimeState.CLOCK_ROLLBACK in current.reasons:
+            return "CLOCK_ROLLBACK"
+        raise RecoveryError("LICENSE_RECOVERY_NOT_REQUIRED", 409)
+
+    def get_or_create_recovery_request(self) -> RecoveryRequest:
+        """Return a durable stable challenge for the current local anomaly."""
+        with self._lock:
+            try:
+                self._recovery_ready()
+                with self.store.locked():
+                    reason = self._recovery_reason()
+                    raw, _, epoch = self._recovery_context()
+                    assert self._master is not None and self._installation is not None
+                    challenge_store = self._challenge_store
+                    try:
+                        previous: bytes | None = challenge_store.read()
+                    except FileNotFoundError:
+                        previous = None
+                    if previous is not None:
+                        try:
+                            request = decode_challenge(
+                                previous, self.profile, self.service, self._master
+                            )
+                        except ValueError:
+                            request = None
+                        if request is not None and (
+                            request.nonce != self._invalidated_nonce
+                            and request.installation_id == self._installation
+                            and request.state_identity == state_identity(raw)
+                            and (
+                                epoch is None
+                                or (request.base_epoch is not None and request.base_epoch >= epoch)
+                            )
+                        ):
+                            try:
+                                challenge_store.confirm(previous)
+                            except OSError as exc:
+                                raise RecoveryError("LICENSE_STORAGE_OUTCOME_UNKNOWN", 202) from exc
+                            return request
+                    payload = {
+                        "schema_version": 1,
+                        "kind": "clock-recovery-request",
+                        "product_id": self.profile.product_id,
+                        "installation_id": self._installation,
+                        "service": self.service,
+                        "nonce": str(uuid4()),
+                        "reason": reason,
+                        "state_identity": state_identity(raw),
+                        "base_epoch": epoch,
+                        "generated_at": utc_text(self.time.wall_now()),
+                    }
+                    from license_sdk.codes import encode_code
+                    from license_sdk.identity import recovery_target
+
+                    target = recovery_target(
+                        self.profile,
+                        self._installation,
+                        self.service,
+                        str(payload["nonce"]),
+                        bytes.fromhex(str(payload["state_identity"])),
+                    )
+                    payload.update(
+                        target_id=target.hex(),
+                        recovery_code=encode_code(
+                            dict(self.profile.recovery_prefixes)[self.service], target
+                        ),
+                    )
+                    request = parse_recovery_request(canonical_json(payload), self.profile)
+                    challenge_store.replace_recovery(
+                        previous, encode_challenge(request, self._master)
+                    )
+                    return request
+            except RecoveryError:
+                raise
+            except StateStoreError as exc:
+                if exc.phase == CommitPhase.COMMIT_DURABILITY_UNKNOWN:
+                    raise RecoveryError("LICENSE_STORAGE_OUTCOME_UNKNOWN", 202) from exc
+                raise RecoveryError("LICENSE_STORAGE_FAILED", 503) from exc
+            except (OSError, ValueError, OverflowError) as exc:
+                raise RecoveryError("LICENSE_STORAGE_FAILED", 503) from exc
+
+    def _refresh_recovery(self, current: ClockState, raw: bytes, *, first: bool) -> None:
+        wall, mono = self.time.wall_now(), self.time.monotonic_ns()
+        reference = max(current.high_watermark, wall)
+        if not first:
+            reference = max(reference, self._last_effective or reference)
+            if self._anchor is not None and self._monotonic is not None:
+                reference = max(
+                    reference,
+                    self._anchor + timedelta(microseconds=(mono - self._monotonic) // 1000),
+                )
+        self._clock, self._raw_clock = current, raw
+        self._anchor = self._last_effective = reference
+        self._monotonic = self._checkpoint_ns = mono
+        self._clock_invalid = False
+
+    def apply_recovery(self, raw_file: bytes) -> RecoveryResult:
+        """Verify and commit one local recovery, then refresh this exact runtime."""
+        with self._lock:
+            signed = verify_recovery(raw_file, profile=self.profile, trusted_keys=self.trusted_keys)
+            try:
+                self._recovery_ready()
+                if signed.installation_id != self._installation or signed.service != self.service:
+                    raise RecoveryError("LICENSE_RECOVERY_TARGET_CHANGED", 409)
+                with self.store.locked():
+                    raw, current, epoch = self._recovery_context()
+                    if current is not None and current.last_recovery_id == signed.recovery_id:
+                        assert raw is not None
+                        pending = self._pending_recovery_id == signed.recovery_id
+                        if (
+                            self._clock is not None
+                            and not pending
+                            and (
+                                current.epoch != self._clock.epoch
+                                or current.sequence < self._clock.sequence
+                                or current.high_watermark < self._clock.high_watermark
+                            )
+                        ):
+                            raise RecoveryError("LICENSE_RECOVERY_TARGET_CHANGED", 409)
+                        try:
+                            self.store.confirm(raw)
+                        except OSError:
+                            self._clock_invalid = True
+                            return RecoveryResult(
+                                "OUTCOME_UNKNOWN", self.status(read_only=True), signed.recovery_id
+                            )
+                        self._refresh_recovery(current, raw, first=pending)
+                        self._pending_recovery_id = None
+                        return RecoveryResult(
+                            "ALREADY_APPLIED", self.status(read_only=True), signed.recovery_id
+                        )
+                    wall = self.time.wall_now()
+                    if not signed.window_start <= wall < signed.window_end:
+                        raise RecoveryError("LICENSE_RECOVERY_WINDOW_INVALID")
+                    try:
+                        self._recovery_reason()
+                    except RecoveryError as exc:
+                        raise RecoveryError("LICENSE_RECOVERY_TARGET_CHANGED", 409) from exc
+                    assert self._master is not None and self._installation is not None
+                    try:
+                        request = decode_challenge(
+                            self._challenge_store.read(), self.profile, self.service, self._master
+                        )
+                    except (OSError, ValueError) as exc:
+                        raise RecoveryError("LICENSE_RECOVERY_TARGET_CHANGED", 409) from exc
+                    if (
+                        request.installation_id != self._installation
+                        or request.nonce == self._invalidated_nonce
+                        or request.target_id != signed.target_id
+                        or request.state_identity != state_identity(raw)
+                        or (
+                            epoch is not None
+                            and (request.base_epoch is None or request.base_epoch < epoch)
+                        )
+                    ):
+                        raise RecoveryError("LICENSE_RECOVERY_TARGET_CHANGED", 409)
+                    epoch = max(
+                        value for value in (epoch, request.base_epoch, 0) if value is not None
+                    )
+                    if epoch == MAX_COUNTER:
+                        raise RecoveryError("LICENSE_RECOVERY_INVALID")
+                    updated = ClockState(
+                        (epoch + 1) if epoch is not None else 1,
+                        0,
+                        wall.replace(microsecond=0),
+                        signed.recovery_id,
+                    )
+                    encoded = encode_clock(
+                        updated,
+                        product_id=self.profile.product_id,
+                        installation_id=self._installation,
+                        service=self.service,
+                        service_key=self._master,
+                    )
+                    try:
+                        self.store.replace_recovery(raw, encoded)
+                    except StateStoreError as exc:
+                        self._clock_invalid = True
+                        if exc.phase == CommitPhase.COMMIT_DURABILITY_UNKNOWN:
+                            self._pending_recovery_id = signed.recovery_id
+                            return RecoveryResult(
+                                "OUTCOME_UNKNOWN", self.status(read_only=True), signed.recovery_id
+                            )
+                        raise RecoveryError("LICENSE_STORAGE_FAILED", 503) from exc
+                    self._refresh_recovery(updated, encoded, first=True)
+                    try:
+                        self._discard_challenge()
+                    except (OSError, ValueError):
+                        logging.getLogger(__name__).warning(
+                            "consumed recovery challenge cleanup failed"
+                        )
+                    return RecoveryResult(
+                        "APPLIED", self.status(read_only=True), signed.recovery_id
+                    )
+            except RecoveryError:
+                raise
+            except (OSError, ValueError, OverflowError) as exc:
+                self._clock_invalid = True
+                raise RecoveryError("LICENSE_STORAGE_FAILED", 503) from exc
 
     def control_proof(self, *, config: ControlProofConfig) -> ControlProof:
         """Read and validate installation credentials even in DEVELOPMENT mode."""

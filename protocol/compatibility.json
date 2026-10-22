@@ -1,12 +1,14 @@
 {
-  "sdk_version": "0.4.0",
-  "status": "phase-4-control-preflight-http-no-background-enforcement",
+  "sdk_version": "0.6.0",
+  "status": "phase-6-single-service-recovery",
   "implemented_protocols": [
     "IC1",
     "RC1J",
     "RC1A",
     "commercial-license-v1",
-    "internal-control-v1"
+    "internal-control-v1",
+    "clock-state-v1",
+    "clock-recovery-v1"
   ],
   "commercial_license_schema_version": 1,
   "commercial_license_implemented": true,
@@ -34,5 +36,10 @@
   },
   "http_enforcement_implemented": true,
   "background_enforcement_implemented": false,
-  "recovery_application_implemented": false
+  "recovery_application_implemented": true,
+  "recovery_vectors": {
+    "file": "recovery-v1-vectors.json",
+    "sha256": "7e85304bf1a3390e3ef8dcdfb5a63cb51ff781b4d78af141982ef604fc005025",
+    "included_in_runtime_artifacts": false
+  }
 }

@@ -93,6 +93,9 @@ class LicenseRuntimeTest {
             return new LicenseRuntime(config, Map.of("runtime-test", signing.getPublic()), time, store);
         }
         void writeLicense(boolean bound, Instant expires) throws Exception {
+            writeLicense(bound, expires, START);
+        }
+        void writeLicense(boolean bound, Instant expires, Instant notBefore) throws Exception {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("schema_version", 1);
             data.put("key_id", "runtime-test");
@@ -108,7 +111,7 @@ class LicenseRuntimeTest {
             data.put("binding_id", bound ? binding : null);
             data.put("validity_type", expires == null ? "PERPETUAL" : "TERM");
             data.put("issued_at", START.toString());
-            data.put("not_before", START.toString());
+            data.put("not_before", notBefore.toString());
             data.put("expires_at", expires == null ? null : expires.toString());
             byte[] raw = JSON.writeValueAsBytes(data);
             Signature signature = Signature.getInstance("Ed25519");
@@ -129,16 +132,58 @@ class LicenseRuntimeTest {
         assertEquals(LicenseRuntime.State.CONFIG_INVALID, fixture.runtime().status().state());
     }
 
-    @Test void rollbackStrictlyExceedsThreeHundredSecondsAndCanCatchUp() throws Exception {
+    @Test void rollbackStrictlyExceedsOneDayAndCanCatchUp() throws Exception {
         Fixture fixture = new Fixture();
         LicenseRuntime runtime = fixture.runtime();
         assertEquals(LicenseRuntime.State.ACTIVE, runtime.status().state());
-        fixture.time.wall = START.minusSeconds(300);
+        fixture.time.wall = START.minusSeconds(86_399);
         assertEquals(LicenseRuntime.State.ACTIVE, runtime.status().state());
-        fixture.time.wall = fixture.time.wall.minusNanos(1);
+        fixture.time.wall = START.minusSeconds(86_400);
+        assertEquals(LicenseRuntime.State.ACTIVE, runtime.status().state());
+        fixture.time.wall = fixture.time.wall.minusSeconds(1);
         assertEquals(LicenseRuntime.State.CLOCK_ROLLBACK, runtime.status().state());
         fixture.time.wall = START;
         assertEquals(LicenseRuntime.State.ACTIVE, runtime.status().state());
+    }
+
+    @Test void guardObservesWithoutClockWritesAndCarriesOneRefusal() throws Exception {
+        Fixture fixture = new Fixture();
+        LicenseRuntime runtime = fixture.runtime();
+        LicenseGuard guard = runtime;
+        byte[] original = Files.readAllBytes(fixture.clock);
+        guard.requireValid();
+        for (int request = 0; request < 3; request++) {
+            fixture.time.advance(31_000_000_000L);
+            guard.requireValid();
+            assertArrayEquals(original, Files.readAllBytes(fixture.clock));
+        }
+        assertEquals(LicenseRuntime.State.ACTIVE, runtime.checkpoint().state());
+        assertEquals(1, ClockStateCodec.decode(Files.readAllBytes(fixture.clock), fixture.key,
+            "icp-diag", INSTALLATION, "metor").sequence());
+        Files.delete(fixture.license);
+        LicenseDeniedException denied = assertThrows(LicenseDeniedException.class, guard::requireValid);
+        assertEquals(LicenseRuntime.State.UNLICENSED, denied.state());
+        assertEquals(List.of("UNLICENSED"), denied.reasons());
+        assertThrows(UnsupportedOperationException.class, () -> denied.reasons().add("ACTIVE"));
+    }
+
+    @Test void exactCommercialBoundsApplyToFirstVerificationCacheAndPreflight() throws Exception {
+        Fixture fixture = new Fixture();
+        Instant notBefore = START.plusSeconds(1);
+        Instant expires = START.plusSeconds(3);
+        fixture.writeLicense(false, expires, notBefore);
+        LicenseRuntime runtime = fixture.runtime();
+        for (int offset = 0; offset <= 4; offset++) {
+            fixture.time.wall = START.plusSeconds(offset);
+            fixture.time.mono = offset * 1_000_000_000L;
+            var expected = offset < 1 ? LicenseRuntime.State.NOT_YET_VALID
+                : offset >= 3 ? LicenseRuntime.State.EXPIRED : LicenseRuntime.State.ACTIVE;
+            assertEquals(expected, runtime.inspect().state());
+            assertEquals(expected, fixture.runtime().inspect().state());
+            assertEquals(expected.name(), runtime.preflight(Files.readAllBytes(fixture.license)).status().name());
+            if (expected == LicenseRuntime.State.ACTIVE) runtime.requireValid();
+            else assertEquals(expected, assertThrows(LicenseDeniedException.class, runtime::requireValid).state());
+        }
     }
 
     @Test void repeatedSmallRollbacksDoNotLowerMonotonicReference() throws Exception {
@@ -146,12 +191,12 @@ class LicenseRuntimeTest {
         LicenseRuntime runtime = fixture.runtime();
         runtime.status();
         for (int step = 0; step < 3; step++) {
-            fixture.time.mono += 100_000_000_000L;
+            fixture.time.mono += 28_800_000_000_000L;
             assertEquals(LicenseRuntime.State.ACTIVE, runtime.status().state());
         }
         fixture.time.mono++;
         assertEquals(LicenseRuntime.State.CLOCK_ROLLBACK, runtime.status().state());
-        assertArrayEquals(ClockStateCodec.encode(fixture.state(START.plusSeconds(300), 3), fixture.key), Files.readAllBytes(fixture.clock));
+        assertArrayEquals(ClockStateCodec.encode(fixture.state(START.plusSeconds(86_400), 3), fixture.key), Files.readAllBytes(fixture.clock));
     }
 
     @Test void exactExpiryUsesNanosecondsWithoutRoundingGraceAndRechecksCachedLicense() throws Exception {
@@ -167,7 +212,7 @@ class LicenseRuntimeTest {
         assertEquals(LicenseRuntime.State.EXPIRED, runtime.status().state());
     }
 
-    @Test void checkpointsPersistThirtySecondsAndBeforeExecutionPersistsEarlier() throws Exception {
+    @Test void checkpointsPersistThirtySecondsAndExplicitCheckpointPersistsEarlier() throws Exception {
         Fixture fixture = new Fixture();
         LicenseRuntime runtime = fixture.runtime();
         byte[] original = Files.readAllBytes(fixture.clock);
@@ -175,7 +220,7 @@ class LicenseRuntimeTest {
         fixture.time.advance(29_999_999_999L);
         runtime.status();
         assertArrayEquals(original, Files.readAllBytes(fixture.clock));
-        runtime.beforeExecution();
+        runtime.checkpoint();
         ClockState state = ClockStateCodec.decode(Files.readAllBytes(fixture.clock), fixture.key, "icp-diag", INSTALLATION, "metor");
         assertEquals(START.plusSeconds(29), state.highWatermark());
         fixture.time.advance(30_000_000_000L);
@@ -188,11 +233,11 @@ class LicenseRuntimeTest {
         Fixture fixture = new Fixture();
         LicenseRuntime first = fixture.runtime();
         first.status();
-        fixture.time.advance(600_000_000_000L);
+        fixture.time.advance(86_401_000_000_000L);
         first.checkpoint();
         fixture.time.wall = START;
         assertEquals(LicenseRuntime.State.CLOCK_ROLLBACK, fixture.runtime().status().state());
-        fixture.time.wall = START.plusSeconds(600);
+        fixture.time.wall = START.plusSeconds(86_401);
         assertEquals(LicenseRuntime.State.ACTIVE, fixture.runtime().status().state());
     }
 
@@ -262,7 +307,7 @@ class LicenseRuntimeTest {
             };
             LicenseRuntime runtime = fixture.runtime(failing);
             assertEquals(LicenseRuntime.State.ACTIVE, runtime.status().state());
-            assertEquals(LicenseRuntime.State.CLOCK_STATE_INVALID, runtime.beforeExecution().state());
+            assertEquals(LicenseRuntime.State.CLOCK_STATE_INVALID, runtime.checkpoint().state());
             assertEquals(LicenseRuntime.State.CLOCK_STATE_INVALID, runtime.status().state());
         }
     }
@@ -337,9 +382,9 @@ class LicenseRuntimeTest {
         first.status(); second.status();
         try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
             var left = executor.submit(() -> { for (int index = 0; index < 10; index++)
-                assertEquals(LicenseRuntime.State.ACTIVE, first.beforeExecution().state()); });
+                assertEquals(LicenseRuntime.State.ACTIVE, first.checkpoint().state()); });
             var right = executor.submit(() -> { for (int index = 0; index < 10; index++)
-                assertEquals(LicenseRuntime.State.ACTIVE, second.beforeExecution().state()); });
+                assertEquals(LicenseRuntime.State.ACTIVE, second.checkpoint().state()); });
             left.get(); right.get();
         }
         assertEquals(20, ClockStateCodec.decode(Files.readAllBytes(fixture.clock), fixture.key, "icp-diag", INSTALLATION, "metor").sequence());

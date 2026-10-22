@@ -2,14 +2,14 @@
 
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal
-SDK development only; published adapter metadata pins `metor-license-core==0.4.0`.
+SDK development only; published adapter metadata pins `metor-license-core==0.6.0`.
 
 Phase 1 implements product profiles, host/install binding digests, manual request/recovery
-code codecs, packaged public vectors, an admission protocol and a thin FastAPI adapter.
+code codecs, packaged public vectors, a local guard protocol and a thin FastAPI adapter.
 Phase 2 adds strict commercial payload validation, raw-byte Ed25519 verification and
 TERM/PERPETUAL × HOST_INSTALL/UNBOUND evaluation. Phase 3 adds strict installation/clock observation and durable monotonic clock protection.
-It does not yet implement execution admission or recovery application. The adapter requires an injected guard; no permissive default
-runtime is provided. It must run after host authentication; hosts retain operation semantics.
+Phase 6 adds single-service recovery in the same runtime. It does not implement workflow admission. Version 0.6.0 is built locally for unified integration; existing 0.4.0 wheels remain unchanged. The adapter requires an injected guard; no permissive default
+runtime is provided. It must run after host authentication; hosts choose protected entry points.
 
 Run `uv sync --all-packages` once, then `uv lock --check`, `uv run --locked ruff check .`,
 `uv run --locked ruff format --check .`, `uv run --locked mypy src fastapi/src`,
@@ -32,11 +32,11 @@ request handling. All protocol errors carry a `LicenseValidationError.reason` ca
 
 Phase 3 public runtime lives in `license_sdk.runtime`. Construct `LicenseRuntime` with an
 explicit `ProductProfile`, service, `RuntimePaths`, build mode and immutable trusted key
-mapping. `status(force_checkpoint=True)` provides the persistence seam for future execution
-admission; it is not itself a task guard. The product lifecycle must invoke a checkpoint at
+mapping. `checkpoint()` explicitly persists time state; `require_valid()` only observes
+state and throws `LicenseDeniedError(state, reasons)` unless ACTIVE or DEVELOPMENT. The product lifecycle must invoke a checkpoint at
 least every 30 seconds, independently of status requests. Missing/corrupt identity or clock
 never initializes replacement state, and integrity or commit failures remain sticky until
-controlled recovery in a later phase. Development mode never touches local installation files.
+a signed recovery is durably applied by the same runtime. Development mode never touches local installation files.
 
 `RuntimeStatus` preserves ordered reasons, primary state, operating mode, current effective
 time, and verified commercial payload/digests. Each status observes current license bytes
@@ -60,6 +60,25 @@ They are unrelated to user JWTs, commercial Ed25519 signatures and TASK proofs.
 `LicenseRuntime.preflight(raw)` validates a candidate against real UTC, independently
 reports current clock restrictions, and never publishes, checkpoints or creates lock
 files. Initial activation works without an existing commercial file.
-`status(read_only=True)` provides the same non-writing diagnostics. `check(Operation)`
-implements request-level eligibility; products must supply explicit route semantics.
-Unknown operations require ACTIVE. These methods do not confer task continuation rights.
+`status(read_only=True)` provides the same non-writing diagnostics. The `LicenseGuard`
+Protocol exposes only `require_valid()`, and `LicenseDeniedError` preserves the state
+string and reasons tuple from one observation. Display modes are NORMAL, RESTRICTED
+and DEVELOPMENT; there is no SDK read-only exemption. FastAPI products can use
+`require_license(guard, on_denied=...)` after their own authentication.
+
+Rollback tolerance is 86,400 seconds: exactly one day is tolerated, the effective high watermark never decreases, and commercial validity stays precisely [not_before, expires_at). This does not extend CONTROL token windows.
+
+Customer startup uses prebuilt images/installations with the SDK, cryptography, PyJWT and all runtime dependencies preinstalled. No pip/uv or external downloads run at startup. A standalone SDK wheel is not self-contained: a separate offline integration bundle must include the target Linux/Python platform wheelhouse and install with no-index/offline.
+
+
+`get_or_create_recovery_request()` returns a frozen `RecoveryRequest` with `to_dict()` and
+`to_bytes()` for the exact application file and RC1 code. An applicable persisted HMAC
+challenge is reused after repeated calls or restart. `apply_recovery(bytes)` returns
+`RecoveryResult(action_status, status, recovery_id)`; failures have `RecoveryError.code`
+and `.http_status`. APPLIED and ALREADY_APPLIED return current commercial status.
+OUTCOME_UNKNOWN remains restricted until the same file is retried and durability confirmed.
+Requests and applies share the runtime mutex and clock file lock; a committed recovery
+refreshes that exact process instance. Each service uses one process/runtime and its own
+state directory. Recovery never changes the commercial license, and requires a separate
+vendor signature with an exact at-most-seven-day wall-clock window. Product administrators
+must correct host UTC first. A one-day rollback tolerance does not extend this window.

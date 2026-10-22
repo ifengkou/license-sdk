@@ -1,0 +1,113 @@
+{
+  "warning": "PUBLIC SYNTHETIC TEST TRUST ONLY; NEVER SHIP AS CUSTOMER TRUST",
+  "schema_version": 1,
+  "installation_id": "11111111-1111-4111-8111-111111111111",
+  "service_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "public_key_der_base64": "MCowBQYDK2VwAyEA7mDYcOI1bGxeJJ6HPy7TeYsTNCzaL64JSOAjLeU5pDQ=",
+  "vectors": [
+    {
+      "service": "metor",
+      "request": {
+        "schema_version": 1,
+        "kind": "clock-recovery-request",
+        "product_id": "icp-diag",
+        "installation_id": "11111111-1111-4111-8111-111111111111",
+        "service": "metor",
+        "nonce": "22222222-2222-4222-8222-222222222222",
+        "reason": "CLOCK_STATE_INVALID",
+        "state_identity": "8af1d328d75e91cf5fff2deab39607be475491d16c45e89a2721eb14bb9a701e",
+        "base_epoch": null,
+        "generated_at": "2026-10-22T00:00:00Z",
+        "target_id": "252b71f0374f89af1f444ce3bccc38ab9d1dc5e5",
+        "recovery_code": "RC1J-4MNQ3W-1Q9Y4T-Y7T49K-HVSK1R-NEEHVH-F5DMYG"
+      },
+      "challenge": "{\"mac\":\"V10NnO47N-DJixfGcxnWUmeE6VpOCd6lJ3C8VxER45k\",\"payload\":\"eyJiYXNlX2Vwb2NoIjpudWxsLCJnZW5lcmF0ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImluc3RhbGxhdGlvbl9pZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsImtpbmQiOiJyZWNvdmVyeS1jaGFsbGVuZ2UiLCJub25jZSI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsInByb2R1Y3RfaWQiOiJpY3AtZGlhZyIsInJlYXNvbiI6IkNMT0NLX1NUQVRFX0lOVkFMSUQiLCJzY2hlbWFfdmVyc2lvbiI6MSwic2VydmljZSI6Im1ldG9yIiwic3RhdGVfaWRlbnRpdHkiOiI4YWYxZDMyOGQ3NWU5MWNmNWZmZjJkZWFiMzk2MDdiZTQ3NTQ5MWQxNmM0NWU4OWEyNzIxZWIxNGJiOWE3MDFlIn0\"}",
+      "recovery": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1Iiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"8OEK7bcUBwUEfjkCKPUOXOdCXE0Z7vCCOzGTAJKzp2AnOU-tmYrziGGkiK6vPR7ZZpjrH4vKLl-p3hA7RTCgAg\"}",
+      "sha256": "128cc370b1ba9e4beeb99499c5dacdb05cb86577b714fdc21d3a13e79a15c538"
+    },
+    {
+      "service": "ai",
+      "request": {
+        "schema_version": 1,
+        "kind": "clock-recovery-request",
+        "product_id": "icp-diag",
+        "installation_id": "11111111-1111-4111-8111-111111111111",
+        "service": "ai",
+        "nonce": "22222222-2222-4222-8222-222222222222",
+        "reason": "CLOCK_STATE_INVALID",
+        "state_identity": "8af1d328d75e91cf5fff2deab39607be475491d16c45e89a2721eb14bb9a701e",
+        "base_epoch": null,
+        "generated_at": "2026-10-22T00:00:00Z",
+        "target_id": "9878b3c75bcaccc1132f9b3a4c17507bae911d4c",
+        "recovery_code": "RC1A-K1WB7H-TVSB6C-24SFKC-X4R5TG-FEQ927-AC62GG"
+      },
+      "challenge": "{\"mac\":\"fTpPH1y_Yp5SXEcABozVZSz-2LhU18HyQQPlHY0hpiY\",\"payload\":\"eyJiYXNlX2Vwb2NoIjpudWxsLCJnZW5lcmF0ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImluc3RhbGxhdGlvbl9pZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsImtpbmQiOiJyZWNvdmVyeS1jaGFsbGVuZ2UiLCJub25jZSI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsInByb2R1Y3RfaWQiOiJpY3AtZGlhZyIsInJlYXNvbiI6IkNMT0NLX1NUQVRFX0lOVkFMSUQiLCJzY2hlbWFfdmVyc2lvbiI6MSwic2VydmljZSI6ImFpIiwic3RhdGVfaWRlbnRpdHkiOiI4YWYxZDMyOGQ3NWU5MWNmNWZmZjJkZWFiMzk2MDdiZTQ3NTQ5MWQxNmM0NWU4OWEyNzIxZWIxNGJiOWE3MDFlIn0\"}",
+      "recovery": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoiYWkiLCJ0YXJnZXRfaWQiOiI5ODc4YjNjNzViY2FjY2MxMTMyZjliM2E0YzE3NTA3YmFlOTExZDRjIiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"c4HRqfqXezB_YAbl7UU8gfVquLpEyFpiDyxqKiFEtdSQ5YVXsXMC9CQQh59x4ILStsu7TuoazW2ef69BBXhXCg\"}",
+      "sha256": "bf8b09bd03f392a05ec90a3a51ea8c93310c596948ce5c39b751e4ec7f65f07a"
+    }
+  ],
+  "negative_cases": [
+    "wrong-product",
+    "wrong-installation",
+    "wrong-service",
+    "wrong-purpose",
+    "wrong-target",
+    "expired-window",
+    "future-window",
+    "window-over-seven-days",
+    "duplicate-field",
+    "unknown-field",
+    "noncanonical-base64",
+    "tampered-signature",
+    "changed-clock",
+    "unsafe-path",
+    "counter-overflow"
+  ],
+  "negative_vectors": [
+    {
+      "name": "wrong-product",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoib3RoZXItcHJvZHVjdCIsInJlY292ZXJ5X2lkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwic2NoZW1hX3ZlcnNpb24iOjEsInNlcnZpY2UiOiJtZXRvciIsInRhcmdldF9pZCI6IjI1MmI3MWYwMzc0Zjg5YWYxZjQ0NGNlM2JjY2MzOGFiOWQxZGM1ZTUiLCJ3aW5kb3dfZW5kIjoiMjAyNi0xMC0yOVQwMDowMDowMFoiLCJ3aW5kb3dfc3RhcnQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiJ9\",\"signature\":\"0jQKPoh8MCBSpb8UJ8DfY-qnBEWEyx9kuZ-M7XuN821egzjndYf8FTb8byObor04OeRVnjE7s6DyDvTIn_vPBA\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "wrong-kind",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY29tbWVyY2lhbC1saWNlbnNlIiwicHJvZHVjdF9pZCI6ImljcC1kaWFnIiwicmVjb3ZlcnlfaWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJzY2hlbWFfdmVyc2lvbiI6MSwic2VydmljZSI6Im1ldG9yIiwidGFyZ2V0X2lkIjoiMjUyYjcxZjAzNzRmODlhZjFmNDQ0Y2UzYmNjYzM4YWI5ZDFkYzVlNSIsIndpbmRvd19lbmQiOiIyMDI2LTEwLTI5VDAwOjAwOjAwWiIsIndpbmRvd19zdGFydCI6IjIwMjYtMTAtMjJUMDA6MDA6MDBaIn0\",\"signature\":\"rs4FcKmmdi63AUzQVi8si69iAnS5auFT_483PLodMKWPnjJjU2kAY-yELKIicLWyuMvCSOb7sEiJozhXwdZFDQ\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "unknown-field",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1IiwidW5leHBlY3RlZCI6dHJ1ZSwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"2BzCg4-LmszYfq2ThKwNIOFSVTlnYzFAMjqiiajaAmrmOmDKD1KKVUscGZvYcL5ZLRyPXz7lanxiOdrn0YyQAg\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "counter-schema-bool",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjp0cnVlLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1Iiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"AQAvD7M_9Z0HbK9ji1EHdNlyL4hALCnQbavG2PFQWosCw4iXGoRA7bbXNO4Xq74OSfhTxlhWR0pPkKpk9dsaBQ\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "over-seven-days",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1Iiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDFaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"za1IHutYkiu5DfAft9g0xSY1lO9h_uV0zuR5-s-ITAZY4DZdMLHUGjSYMzCSJCURzLKmfVGF_rLHHLEm4wMwAw\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "noncanonical-uuid",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtMzMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1Iiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"XZq0_p68WZoyZOTEMfGtEJsaeSrNqOj3D95X_ShI7Ho2LP2og_0Cvx0lGzMEIYuoURqBKgBmeZHuAEQ8MmKCCw\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "duplicate-payload-field",
+      "file": "{\"payload\":\"eyJzY2hlbWFfdmVyc2lvbiI6MSwiaW5zdGFsbGF0aW9uX2lkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwiaXNzdWVkX2F0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoiLCJrZXlfaWQiOiJyZWNvdmVyeS10ZXN0Iiwia2luZCI6ImNsb2NrLXJlY292ZXJ5IiwicHJvZHVjdF9pZCI6ImljcC1kaWFnIiwicmVjb3ZlcnlfaWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJzY2hlbWFfdmVyc2lvbiI6MSwic2VydmljZSI6Im1ldG9yIiwidGFyZ2V0X2lkIjoiMjUyYjcxZjAzNzRmODlhZjFmNDQ0Y2UzYmNjYzM4YWI5ZDFkYzVlNSIsIndpbmRvd19lbmQiOiIyMDI2LTEwLTI5VDAwOjAwOjAwWiIsIndpbmRvd19zdGFydCI6IjIwMjYtMTAtMjJUMDA6MDA6MDBaIn0\",\"signature\":\"fbyBnA_Yv8_EAia3QKkfRvtTT-1F1y0PT3dQZ4Ks47vK2tIsHVL85AvViRJgAJcwJ4m1O-kH_1vzXfqXaDXSCg\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "tampered-signature",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1Iiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ\",\"signature\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    },
+    {
+      "name": "padded-base64",
+      "file": "{\"payload\":\"eyJpbnN0YWxsYXRpb25faWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIyVDAwOjAwOjAwWiIsImtleV9pZCI6InJlY292ZXJ5LXRlc3QiLCJraW5kIjoiY2xvY2stcmVjb3ZlcnkiLCJwcm9kdWN0X2lkIjoiaWNwLWRpYWciLCJyZWNvdmVyeV9pZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInNjaGVtYV92ZXJzaW9uIjoxLCJzZXJ2aWNlIjoibWV0b3IiLCJ0YXJnZXRfaWQiOiIyNTJiNzFmMDM3NGY4OWFmMWY0NDRjZTNiY2NjMzhhYjlkMWRjNWU1Iiwid2luZG93X2VuZCI6IjIwMjYtMTAtMjlUMDA6MDA6MDBaIiwid2luZG93X3N0YXJ0IjoiMjAyNi0xMC0yMlQwMDowMDowMFoifQ=\",\"signature\":\"8OEK7bcUBwUEfjkCKPUOXOdCXE0Z7vCCOzGTAJKzp2AnOU-tmYrziGGkiK6vPR7ZZpjrH4vKLl-p3hA7RTCgAg\"}",
+      "error": "LICENSE_RECOVERY_INVALID"
+    }
+  ]
+}

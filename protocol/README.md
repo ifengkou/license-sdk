@@ -50,3 +50,10 @@ are separate results. Product adapters retain administrator authorization,
 whole-file digest concurrency control, dual preflight and publication semantics.
 Conformance: `tools/verify_phase4_control.py` uses an independent standard-library
 HMAC oracle plus actual Java/Python issuance and verification.
+
+
+Phase 6 single-service recovery vectors: `recovery-v1-vectors.json` contains public synthetic
+Metor/AI request, HMAC challenge and signed recovery files, with malformed signed negatives.
+These signing fixtures are excluded from runtime trust/artifacts. `tools/verify_phase6_recovery.py`
+uses actual issuer CLI output against Java/Python built artifacts, not fixture signatures alone.
+Recovery windows are exact, at most seven days; RC1 bytes and commercial v1 are unchanged.

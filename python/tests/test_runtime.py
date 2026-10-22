@@ -153,15 +153,15 @@ def test_unbound_no_machine_and_checkpoint(runtime):
 def test_rollback_and_automatic_catchup(runtime):
     instance, clock, root, _, _ = runtime
     assert instance.status().state == RuntimeState.ACTIVE
-    clock.advance(301)
+    clock.advance(86_401)
     clock.wall = NOW
     assert instance.status().state == RuntimeState.CLOCK_ROLLBACK
     before = (root / "state/ai/clock.json").read_bytes()
     assert instance.status(force_checkpoint=True).state == RuntimeState.CLOCK_ROLLBACK
     assert (root / "state/ai/clock.json").read_bytes() == before
     clock.wall = NOW + timedelta(seconds=1)
-    assert instance.status().state == RuntimeState.ACTIVE  # exact 300s tolerance
-    assert instance.status().effective_now == NOW + timedelta(seconds=301)
+    assert instance.status().state == RuntimeState.ACTIVE  # exact one-day tolerance
+    assert instance.status().effective_now == NOW + timedelta(seconds=86_401)
 
 
 def test_forward_jump_retained_without_checkpoint(runtime):
@@ -184,6 +184,59 @@ def test_exact_subsecond_expiry(runtime):
     assert instance.status().state == RuntimeState.ACTIVE
     clock.advance(0.000001)
     assert instance.status().state == RuntimeState.EXPIRED
+
+
+@pytest.mark.parametrize(
+    "lag,expected", [(86_399, "ACTIVE"), (86_400, "ACTIVE"), (86_401, "CLOCK_ROLLBACK")]
+)
+def test_one_day_rollback_boundary(runtime, lag, expected):
+    instance, clock, _, _, _ = runtime
+    instance.require_valid()
+    clock.wall = NOW - timedelta(seconds=lag)
+    result = instance.status(read_only=True)
+    assert result.state.value == expected
+    assert result.effective_now == NOW
+
+
+def test_guard_never_writes_clock_even_after_checkpoint_interval(runtime):
+    instance, clock, root, install_id, _ = runtime
+    before = (root / "state/ai/clock.json").read_bytes()
+    instance.require_valid()
+    for _ in range(3):
+        clock.advance(31)
+        instance.require_valid()
+        assert (root / "state/ai/clock.json").read_bytes() == before
+    assert not (root / "state/ai/clock.lock").exists()
+    assert instance.checkpoint().state == RuntimeState.ACTIVE
+    assert read_clock(root, install_id).sequence == 1
+
+
+def test_commercial_boundaries_have_no_rollback_grace(runtime):
+    from license_sdk.guard import LicenseDeniedError
+
+    instance, clock, root, _, publish = runtime
+    publish({"not_before": "2026-10-20T00:00:01Z", "expires_at": "2026-10-20T00:00:03Z"})
+    candidate = (root / "shared/active.license.json").read_bytes()
+    for offset, expected in enumerate(("NOT_YET_VALID", "ACTIVE", "ACTIVE", "EXPIRED", "EXPIRED")):
+        clock.wall = NOW + timedelta(seconds=offset)
+        clock.mono = offset * 1_000_000_000
+        assert instance.status(read_only=True).state.value == expected
+        fresh = LicenseRuntime(
+            profile=ICP_DIAG,
+            service="ai",
+            paths=instance.paths,
+            trusted_keys=instance.trusted_keys,
+            mode=BuildMode.CUSTOMER_REQUIRED,
+            time_source=clock,
+        )
+        assert fresh.status(read_only=True).state.value == expected
+        assert instance.preflight(candidate).state.value == expected
+        if expected == "ACTIVE":
+            instance.require_valid()
+        else:
+            with pytest.raises(LicenseDeniedError) as caught:
+                instance.require_valid()
+            assert caught.value.state == expected
 
 
 @pytest.mark.parametrize("damage", ["missing", "bytes", "mac", "symlink"])
@@ -210,7 +263,7 @@ def test_clock_integrity_sticky_no_recreation(runtime, damage):
         path.unlink()
     path.write_bytes(original)
     assert instance.status().state == RuntimeState.CLOCK_STATE_INVALID
-    assert instance.status().mode == "READ_ONLY"
+    assert instance.status().mode == "RESTRICTED"
 
 
 def test_license_observed_each_time_and_priority(runtime):
@@ -222,7 +275,7 @@ def test_license_observed_each_time_and_priority(runtime):
     assert instance.status().file_digest != first.file_digest
     path.write_bytes(b"broken")
     assert instance.status().state == RuntimeState.INVALID
-    assert instance.status().mode == "MANAGEMENT_ONLY"
+    assert instance.status().mode == "RESTRICTED"
     path.unlink()
     (root / "state/ai/clock.json").unlink()
     result = instance.status()
@@ -232,14 +285,14 @@ def test_license_observed_each_time_and_priority(runtime):
     assert instance.status().state == RuntimeState.CLOCK_STATE_INVALID
 
 
-def test_future_license_never_readonly_on_bad_clock(runtime):
+def test_future_license_remains_restricted_on_bad_clock(runtime):
     instance, _, root, _, publish = runtime
     publish({"not_before": "2027-01-01T00:00:00Z"})
     (root / "state/ai/clock.json").unlink()
     result = instance.status()
     assert result.state == RuntimeState.CLOCK_STATE_INVALID
     assert RuntimeState.NOT_YET_VALID in result.reasons
-    assert result.mode == "MANAGEMENT_ONLY"
+    assert result.mode == "RESTRICTED"
 
 
 def test_identity_missing_incomplete_changed(runtime):
@@ -282,7 +335,7 @@ def test_bound_requires_real_machine_id(runtime):
 def test_restart_keeps_persisted_reference(runtime):
     instance, clock, root, _, _ = runtime
     instance.status()
-    clock.advance(400)
+    clock.advance(86_401)
     instance.status(force_checkpoint=True)
     clock.wall = NOW
     restarted = LicenseRuntime(
@@ -294,7 +347,7 @@ def test_restart_keeps_persisted_reference(runtime):
         time_source=clock,
     )
     assert restarted.status().state == RuntimeState.CLOCK_ROLLBACK
-    assert restarted.status().effective_now >= NOW + timedelta(seconds=400)
+    assert restarted.status().effective_now >= NOW + timedelta(seconds=86_401)
     assert (root / "state/ai/clock.json").exists()
 
 
@@ -473,7 +526,7 @@ def test_preflight_real_utc_ignores_polluted_reference_retains_restriction(runti
     assert result.acceptable
     assert RuntimeState.CLOCK_ROLLBACK in result.reasons
     assert (root / "state/ai/clock.json").read_bytes() == before
-    assert instance.status(read_only=True).mode == "READ_ONLY"
+    assert instance.status(read_only=True).mode == "RESTRICTED"
 
 
 def test_preflight_future_expired_invalid_and_wrong_host(runtime):
@@ -501,17 +554,19 @@ def test_preflight_future_expired_invalid_and_wrong_host(runtime):
 
 
 def test_request_guard_observes_file_each_time(runtime):
-    from license_sdk.contracts import Operation
+    from license_sdk.guard import LicenseDeniedError
 
     instance, _, root, _, publish = runtime
-    assert instance.check(Operation.COMPUTE).allowed
+    instance.require_valid()
     publish({"not_before": "2026-10-19T00:00:00Z", "expires_at": "2026-10-20T00:00:00Z"})
-    assert instance.check(Operation.READ_EXISTING).allowed
-    for operation in (Operation.MODIFY, Operation.COMPUTE, Operation.UNKNOWN):
-        assert not instance.check(operation).allowed
+    with pytest.raises(LicenseDeniedError) as caught:
+        instance.require_valid()
+    assert caught.value.state == "EXPIRED"
+    assert caught.value.reasons == ("EXPIRED",)
     (root / "shared/active.license.json").unlink()
-    assert not instance.check(Operation.READ_EXISTING).allowed
-    assert instance.check(Operation.SESSION_OR_MANAGEMENT).allowed
+    with pytest.raises(LicenseDeniedError) as caught:
+        instance.require_valid()
+    assert caught.value.state == "UNLICENSED"
 
 
 def test_internal_auth_always_needs_identity_in_development(tmp_path):

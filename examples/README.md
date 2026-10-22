@@ -13,3 +13,5 @@ Run `license-issuer/.venv/bin/python license-sdk/tools/verify_phase2_cross_langu
 from the workspace root for actual CLI issuance and Java/Python verification; see script help.
 Temporary synthetic keys never enter release artifacts. Consumers use fixed release packages,
 not business repository or issuer source imports.
+
+For runtime-protected entry points use `LicenseRuntime.requireValid()` (Java) or `require_valid()` (Python), catch the typed refusal once in the host error adapter, and schedule `checkpoint()` every 30 seconds independently of requests. The FastAPI adapter is `require_license(guard)`. These entry checks never force a checkpoint or select read-only business modes.

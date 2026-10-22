@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -55,6 +56,42 @@ public final class FileStateStore implements StateStore {
         Path safe = checked(path);
         // Runtime may replace existing state, never initialize or recreate missing state.
         if (!Files.isRegularFile(safe, LinkOption.NOFOLLOW_LINKS)) { return CommitOutcome.NOT_COMMITTED; }
+        return publish(safe, bytes);
+    }
+
+    @Override
+    public CommitOutcome replaceRecovery(Path path, byte[] expected, byte[] replacement) throws IOException {
+        Path safe = checked(path);
+        byte[] actual;
+        try { actual = read(safe, 8192); }
+        catch (java.nio.file.NoSuchFileException missing) { actual = null; }
+        if (!Arrays.equals(actual, expected)) return CommitOutcome.NOT_COMMITTED;
+        return publish(safe, replacement);
+    }
+
+    @Override
+    public CommitOutcome confirmDurability(Path path, byte[] expected) throws IOException {
+        Path safe = checked(path);
+        if (!Arrays.equals(read(safe, 8192), expected)) return CommitOutcome.NOT_COMMITTED;
+        try (FileChannel file = FileChannel.open(safe, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+            file.force(true);
+            try (FileChannel parent = FileChannel.open(safe.getParent(), StandardOpenOption.READ)) { parent.force(true); }
+            return CommitOutcome.COMMITTED;
+        } catch (IOException | UnsupportedOperationException error) { return CommitOutcome.COMMIT_DURABILITY_UNKNOWN; }
+    }
+
+    @Override
+    public void deleteRecoveryChallenge(Path path) throws IOException {
+        Path safe = checked(path);
+        if (Files.exists(safe, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(safe, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Invalid recovery challenge path");
+        }
+        if (Files.deleteIfExists(safe)) {
+            try (FileChannel parent = FileChannel.open(safe.getParent(), StandardOpenOption.READ)) { parent.force(true); }
+        }
+    }
+
+    private static CommitOutcome publish(Path safe, byte[] bytes) throws IOException {
         Path temporary = Files.createTempFile(safe.getParent(), ".clock-", ".tmp",
             PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
         boolean published = false;

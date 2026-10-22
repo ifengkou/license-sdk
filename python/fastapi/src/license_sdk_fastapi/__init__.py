@@ -1,23 +1,23 @@
-"""Explicit FastAPI dependency adapter; products decide operation and error shape."""
+"""Explicit FastAPI dependency adapter; products choose entry points and error shape."""
 
 from collections.abc import Callable
 
 from fastapi import HTTPException
-from license_sdk.contracts import Admission, AdmissionGuard, Operation
+from license_sdk.guard import LicenseDeniedError, LicenseGuard
 
 
-def require_operation(
-    guard: AdmissionGuard,
-    operation: Operation,
-    on_denied: Callable[[Admission], Exception] | None = None,
+def require_license(
+    guard: LicenseGuard,
+    on_denied: Callable[[LicenseDeniedError], Exception] | None = None,
 ) -> Callable[[], None]:
     """Call after host authentication; no route or HTTP-verb based exemptions."""
 
     def dependency() -> None:
-        admission = guard.check(operation)
-        if not admission.allowed:
+        try:
+            guard.require_valid()
+        except LicenseDeniedError as denied:
             if on_denied is not None:
-                raise on_denied(admission)
-            raise HTTPException(status_code=403, detail=admission.reason)
+                raise on_denied(denied) from denied
+            raise HTTPException(status_code=403, detail=denied.state) from denied
 
     return dependency

@@ -1,6 +1,7 @@
-"""Offline license SDK core, version 0.4.0."""
+"""Offline license SDK core, target version 0.6.0 (not yet released)."""
 
 from license_sdk.codes import CodeError, CodeErrorReason, decode_code, encode_code
+from license_sdk.guard import LicenseDeniedError, LicenseGuard
 from license_sdk.profile import ICP_DIAG, ProductProfile
 from license_sdk.verification import (
     CommercialLicense,
@@ -16,6 +17,8 @@ from license_sdk.verification import (
 
 __all__ = [
     "CommercialLicense",
+    "LicenseDeniedError",
+    "LicenseGuard",
     "LicenseErrorReason",
     "LicenseStatus",
     "LicenseValidationError",
