@@ -1,5 +1,7 @@
 # Python license SDK
 
+[中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
+
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal
 SDK development only; published adapter metadata pins `metor-license-core==0.6.0`.

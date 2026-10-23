@@ -1,4 +1,6 @@
-# Java license SDK — Phase 6
+# Java license SDK Phase 6
+
+[中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
 
 Java 21 standalone Gradle project. Provisional local coordinates are
 `io.metor.license:license-core:0.6.0` and `io.metor.license:license-spring:0.6.0`.

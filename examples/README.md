@@ -15,3 +15,5 @@ Temporary synthetic keys never enter release artifacts. Consumers use fixed rele
 not business repository or issuer source imports.
 
 For runtime-protected entry points use `LicenseRuntime.requireValid()` (Java) or `require_valid()` (Python), catch the typed refusal once in the host error adapter, and schedule `checkpoint()` every 30 seconds independently of requests. The FastAPI adapter is `require_license(guard)`. These entry checks never force a checkpoint or select read-only business modes.
+
+For complete Java/Python Runtime construction and protected-entry examples, use the [Chinese integration guide](../docs/integration-cn.md). Its examples share one long-lived runtime per service; low-level verification alone does not provide persistent rollback protection.
