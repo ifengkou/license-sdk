@@ -1,4 +1,4 @@
-"""Independent synthetic signed adversarial corpus; writes no private key."""
+"""Synthetic CLI and independent adversarial corpus; temporary test keys only."""
 
 from __future__ import annotations
 
@@ -305,6 +305,35 @@ def run_cli(python, *args, success=True):
     return result
 
 
+def write_issuer_config(path, profile, *, key_id, private, public, records, output):
+    """Write a complete, synthetic single-product issuer configuration."""
+    values = {
+        "product_id": profile.product_id,
+        "fingerprint_domain": profile.fingerprint_domain.decode("ascii"),
+        "binding_domain": profile.binding_domain.decode("ascii"),
+        "recovery_domain": profile.recovery_domain.decode("ascii"),
+        "request_prefix": profile.request_prefix,
+        "key_id": key_id,
+        "private_key": str(private),
+        "public_key": str(public),
+        "records_dir": str(records),
+        "output_dir": str(output),
+    }
+    lines = [f"{name} = {json.dumps(value)}" for name, value in values.items()]
+    lines.append("port = 18200")
+    for service, prefix in profile.recovery_prefixes:
+        lines.extend(
+            [
+                "",
+                "[[services]]",
+                f"id = {json.dumps(service)}",
+                f"recovery_prefix = {json.dumps(prefix)}",
+            ]
+        )
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
 def main():
     import argparse
     import subprocess
@@ -353,25 +382,29 @@ def main():
             "--passphrase-file",
             password,
         )
-        key_args = [
-            "--key-id",
-            "cli-test",
-            "--private-key",
-            private,
-            "--passphrase-file",
-            password,
-        ]
+        from license_sdk import ICP_DIAG, ProductProfile
+        from license_sdk.codes import encode_code
+        from license_sdk.identity import binding_id, host_fingerprint
+
+        records = directory / "records"
+        records.mkdir(mode=0o700)
+        config = write_issuer_config(
+            directory / "issuer.toml",
+            ICP_DIAG,
+            key_id="cli-test",
+            private=private,
+            public=public,
+            records=records,
+            output=directory,
+        )
+        key_args = ["--config", config, "--passphrase-file", password]
         customer_args = [
-            "--product",
-            "icp-diag",
             "--customer-id",
             "synthetic-cli",
             "--customer-name",
             "Synthetic CLI test",
         ]
         now = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-        records = directory / "records"
-        records.mkdir(mode=0o700)
         cases = []
         request_code = json.loads((root / "protocol/request-code-v1-vectors.json").read_text())[
             "binding_vectors"
@@ -387,8 +420,6 @@ def main():
                     validity,
                     "--not-before",
                     "2026-01-01T00:00:00Z",
-                    "--records-dir",
-                    records,
                     "--output",
                     output,
                 ]
@@ -419,12 +450,8 @@ def main():
                 run_cli(
                     args.issuer_python,
                     "verify",
-                    "--product",
-                    "icp-diag",
-                    "--key-id",
-                    "cli-test",
-                    "--public-key",
-                    public,
+                    "--config",
+                    config,
                     "--license",
                     output,
                     "--binding-id",
@@ -468,8 +495,6 @@ def main():
             "PERPETUAL",
             "--not-before",
             "2026-01-01T00:00:00Z",
-            "--records-dir",
-            records,
             "--output",
             file_output,
             "--request-file",
@@ -505,8 +530,6 @@ def main():
             "PERPETUAL",
             "--not-before",
             "2026-01-01T00:00:00Z",
-            "--records-dir",
-            records,
             "--output",
             protected_output,
             success=False,
@@ -524,46 +547,86 @@ def main():
         )
         from license_issuer.application import IssueLicenseRequest, IssuerApplication
         from license_issuer.ports import KeyReference
-        from license_sdk import ICP_DIAG, ProductProfile
 
         second_profile = ProductProfile(
-            "second-product",
-            b"second/fingerprint/v1",
-            b"second/binding/v1",
-            b"second/recovery/v1",
-            "SP1",
-            (("worker", "SP1W"),),
+            "other-product",
+            b"other-product/host-fingerprint/v1",
+            b"other-product/host-install-code/v1",
+            b"other-product/recovery-target/v1",
+            "IC1",
+            (("gateway", "RC101"), ("worker", "RC102")),
         )
-        second_output = directory / "second-product.json"
-        app = IssuerApplication(
+        second_config = write_issuer_config(
+            directory / "other-issuer.toml",
             second_profile,
-            signer=EncryptedPemSigner("cli-test", private, password.read_bytes()),
-            records=LocalIssueRecordStore(records),
-            output=AtomicArtifactStore(second_output),
+            key_id="cli-test",
+            private=private,
+            public=public,
+            records=records,
+            output=directory,
         )
-        app.sign_license(
-            IssueLicenseRequest(
-                key_ref=KeyReference("cli-test"),
-                customer_id="synthetic-second",
-                customer_name="Second product test",
-                binding_type="UNBOUND",
-                validity_type="PERPETUAL",
-                not_before="2026-01-01T00:00:00Z",
-                expires_at=None,
-            )
+        actual_binding = binding_id(
+            second_profile,
+            host_fingerprint(second_profile, b"0123456789abcdef0123456789abcdef\n"),
+            "11111111-1111-4111-8111-111111111111",
         )
+        second_cases = []
+        for validity in ("TERM", "PERPETUAL"):
+            for strategy in ("HOST_INSTALL", "UNBOUND"):
+                second_output = directory / f"other-{validity}-{strategy}.json"
+                flags = []
+                if validity == "TERM":
+                    flags += ["--expires-at", "2099-01-01T00:00:00Z"]
+                if strategy == "HOST_INSTALL":
+                    flags += [
+                        "--request-code",
+                        encode_code(second_profile.request_prefix, actual_binding),
+                    ]
+                run_cli(
+                    args.issuer_python,
+                    "sign-license",
+                    "--config",
+                    second_config,
+                    "--passphrase-file",
+                    password,
+                    *customer_args,
+                    "--binding",
+                    strategy,
+                    "--validity",
+                    validity,
+                    "--not-before",
+                    "2026-01-01T00:00:00Z",
+                    "--output",
+                    second_output,
+                    *flags,
+                )
+                second_cases.append(
+                    dict(
+                        name=f"other-{validity}-{strategy}",
+                        file=second_output.name,
+                        accept=True,
+                        now=now,
+                    )
+                )
         second_manifest = dict(
             public_key=public.name,
             key_id="cli-test",
-            binding_id=binding,
-            cases=[dict(name="second-product", file=second_output.name, accept=True, now=now)],
+            binding_id=actual_binding.hex(),
+            cases=second_cases,
         )
-        check_both(directory, second_manifest, classpath, product="second-product")
-        second_manifest["cases"][0]["accept"] = False
-        check_both(directory, second_manifest, classpath, product="icp-diag")
+        check_both(directory, second_manifest, classpath, product=second_profile.product_id)
+        wrong_product = copy.deepcopy(second_manifest)
+        for case in wrong_product["cases"]:
+            case["accept"] = False
+        check_both(directory, wrong_product, classpath, product="icp-diag")
+        wrong_binding = copy.deepcopy(second_manifest)
+        wrong_binding["binding_id"] = binding
+        for case in wrong_binding["cases"]:
+            case["accept"] = "UNBOUND" in case["name"]
+        check_both(directory, wrong_binding, classpath, product=second_profile.product_id)
         print(
-            "PASS: both SDKs accept the second product and reject cross-product use "
-            "with the same key"
+            "PASS: both SDKs accept all four other-product CLI combinations with real "
+            "domain-derived binding, and reject cross-product/wrong-binding use"
         )
         direct_cases = []
         for validity in ("TERM", "PERPETUAL"):
@@ -617,8 +680,6 @@ def main():
             "2026-01-01T00:00:00Z",
             "--request-code",
             request_code,
-            "--records-dir",
-            records,
             "--output",
             invalid,
             success=False,

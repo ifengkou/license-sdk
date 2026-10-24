@@ -30,7 +30,7 @@ Phase 4 的 Java `license-spring` 使用 Nimbus/Jackson，Python 核心使用 Py
 
 同一个 `LicenseRuntime` 提供 Java `getOrCreateRecoveryRequest()` / `applyRecovery(bytes)`、Python `get_or_create_recovery_request()` / `apply_recovery(bytes)`。产品只负责已有管理员权限或安装 ControlProof、收文件和返回结果，不直接写 clock。每服务独立操作，不调用另一服务；当前发行保持每个服务单进程、单 runtime、独立 state 目录。
 
-先校正宿主 UTC，再取得申请。只允许恢复回拨或时间记录异常；普通过期、未来生效或缺少商业许可不是恢复理由。适用挑战持久化在 `state/<service>/recovery-challenge.json`，反复取得和进程重启复用同一 nonce、target 和 RC1J/RC1A 码；申请文件可出网时交文件，不能出网时抄产品、安装 UUID、服务和对应恢复码。IC1 机器申请码不能用于时间恢复。
+先校正宿主 UTC，再取得申请。只允许恢复回拨或时间记录异常；普通过期、未来生效或缺少商业许可不是恢复理由。适用挑战持久化在 `state/<service>/recovery-challenge.json`，反复取得和进程重启复用同一 nonce、target 和配置服务的恢复码（ICP 为 RC1J/RC1A）；申请文件可出网时交文件，不能出网时抄产品、安装 UUID、服务和对应恢复码。IC1 机器申请码不能用于时间恢复。
 
 我方 issuer 0.3.0 的 `sign-recovery` 签发独立 Ed25519 恢复文件；窗口最多七天，按已校正墙钟精确判断，不使用一天回拨容差。SDK 在 runtime 锁和本服务文件锁内验证目标、原子提交并刷新当前实例；商业许可原始字节、机器绑定及到期时间不变。恢复后返回当前商业状态，许可过期仍为 EXPIRED。
 
@@ -39,7 +39,12 @@ Python `RecoveryRequest.to_dict()/to_bytes()` 返回可保存的申请；`Recove
 公开合成恢复向量位于 `protocol/recovery-v1-vectors.json`，不进入运行制品信任。完成本地 SDK 与 issuer 构建后，从工作区根目录运行：
 
 ```sh
-license-issuer/.venv/bin/python license-sdk/tools/verify_phase6_recovery.py
+export JAVA_HOME=/absolute/jdk-21
+export PATH="$JAVA_HOME/bin:$PATH"
+license-issuer/.venv/bin/python license-sdk/tools/verify_phase6_recovery.py \
+  --java-jar /absolute/vendor/license-core-0.6.0.jar
 ```
 
-该工具真实调用 issuer CLI，以临时密钥和目录验证两服务、两语言、文件与手抄输入、三种异常、窗口/签名拒绝和幂等恢复。客户不接收 issuer、商业私钥或签发记录；没有 sign-policy 命令，包内 API 清单由产品构建摘要保护。
+该工具真实调用 issuer CLI，以完整临时 issuer.toml、合成密钥和目录验证 ICP 及另一产品、各两服务、两语言、文件与手抄输入、三种异常、同 Runtime 申请／应用／状态刷新／重复和重启后幂等。另一产品使用实际机器与域派生 HOST_INSTALL 绑定，并检查错产品／服务／恢复域／申请前缀／key／签名／窗口／目标拒绝，以及商业文件和另一服务 clock 原字节不变。`tools/verify_phase2_cross_language.py` 保留 ICP 合成负向语料，并验证另一产品商业四组合及错产品／绑定拒绝。客户不接收 issuer、商业私钥或签发记录；没有 sign-policy 命令，包内 API 清单由产品构建摘要保护。
+
+产品定义从每产品的 issuer.toml 经 Web “SDK 接入配置”页核对，再由产品构建固化为现有 ProductProfile／Java Config。客户不读取我方 TOML 或连接 issuer；SDK 固化后不能随意重定义产品、域和既有服务／前缀。完整示例及安装器／信任责任见 [接入指南](docs/integration-cn.md#产品定义与-issuertoml-一致)。
