@@ -101,11 +101,18 @@ class OnboardingFiles {
         else Files.move(checked(source), checked(destination), StandardCopyOption.ATOMIC_MOVE);
     }
     StateStore.CommitOutcome publish(Path path, byte[] bytes) throws IOException {
+        return publish(path, bytes, null);
+    }
+    StateStore.CommitOutcome publish(Path path, byte[] bytes, Integer sharedGroup) throws IOException {
         Path safe = checked(path);
         Path temp = Files.createTempFile(safe.getParent(), ".license-", ".tmp", PRIVATE_FILE);
         boolean published = false;
         try {
             writeExisting(temp, bytes);
+            if (sharedGroup != null) {
+                attributes(temp, sharedGroup);
+                sync(temp);
+            }
             move(temp, safe, true);
             published = true;
             sync(safe.getParent());
@@ -117,6 +124,24 @@ class OnboardingFiles {
             catch (IOException cleanup) { System.getLogger(OnboardingFiles.class.getName())
                 .log(System.Logger.Level.WARNING, "Could not remove license publish temporary file"); }
         }
+    }
+    static Integer sharedGroup(String value) {
+        if (value == null) return null;
+        if (!value.matches("[0-9]{1,10}")) throw new IllegalArgumentException("Shared group must be a numeric GID");
+        try { return Integer.valueOf(value); }
+        catch (NumberFormatException invalid) { throw new IllegalArgumentException("Shared group must be between 0 and 2147483647", invalid); }
+    }
+    void attributes(Path path, int group) throws IOException {
+        Path safe = checked(path);
+        Files.setAttribute(safe, "unix:gid", group, LinkOption.NOFOLLOW_LINKS);
+        Files.setPosixFilePermissions(safe, PosixFilePermissions.fromString("rw-r-----"));
+        if (!attributesMatch(safe, group)) throw new IOException("Shared license attributes were not applied");
+    }
+    boolean attributesMatch(Path path, Integer sharedGroup) throws IOException {
+        Path safe = checked(path);
+        int expected = sharedGroup == null ? 0600 : 0640;
+        return ((Integer) Files.getAttribute(safe, "unix:mode", LinkOption.NOFOLLOW_LINKS) & 07777) == expected
+            && (sharedGroup == null || sharedGroup.equals(Files.getAttribute(safe, "unix:gid", LinkOption.NOFOLLOW_LINKS)));
     }
     void writeExisting(Path path, byte[] bytes) throws IOException {
         try (var channel = FileChannel.open(checked(path), StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {

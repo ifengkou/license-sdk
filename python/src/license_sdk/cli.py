@@ -12,6 +12,7 @@ from license_sdk.installation import (
     absolute_path,
     initialize_installation,
     sync_directory,
+    validate_installation,
     write_new,
 )
 from license_sdk.product import ProductConfig
@@ -35,26 +36,30 @@ def status_dict(value: RuntimeStatus | None) -> dict[str, object] | None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="license-sdk")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("init", "status", "request", "import"):
+    for command in ("init", "check", "status", "request", "import"):
         operation = commands.add_parser(command)
         operation.add_argument("--config", required=True, type=Path)
         operation.add_argument("--root", required=True, type=Path)
-        operation.add_argument("--service")
-        if command != "init":
+        if command != "check":
+            operation.add_argument("--service")
+        if command not in ("init", "check"):
             operation.add_argument("--machine-id", type=Path, default=Path("/etc/machine-id"))
         if command == "request":
             operation.add_argument("--output", type=Path)
         if command == "import":
             operation.add_argument("--file", required=True, type=Path)
+            operation.add_argument("--shared-group", type=int, help="numeric GID for 0640 sharing")
     args = parser.parse_args(argv)
     try:
         raw = read_bounded(absolute_path(args.config), 65536)
         product = ProductConfig.from_bytes(raw)
-        if args.command == "init":
+        if args.command == "check":
+            value: object = {"installationId": validate_installation(product, args.root)}
+        elif args.command == "init":
             if args.service is not None:
                 product.select_service(args.service)
             result = initialize_installation(product, args.root)
-            value: object = {
+            value = {
                 "actionStatus": result.action_status,
                 "installationId": result.installation_id,
             }
@@ -82,7 +87,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 candidate = read_bounded(absolute_path(args.file), 65536)
                 expected = current_file_digest(runtime.paths.root / "shared/active.license.json")
-                imported = runtime.import_license(candidate, expected)
+                imported = runtime.import_license(
+                    candidate, expected, shared_group=args.shared_group
+                )
                 value = {
                     "actionStatus": imported.action_status,
                     "fileDigest": imported.file_digest,

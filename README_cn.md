@@ -2,7 +2,7 @@
 
 SDK 发行与下载见 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 和 [发行／离线安装文档](docs/releasing.md)。维护者按文档推送版本 tag，CI 自动测试、构建并发布制品。
 
-## 新产品五步接入（0.7.0）
+## 新产品五步接入（0.7.1）
 
 1. 安装本语言 SDK，从 Issuer 的“SDK 接入配置”下载 `license-product.json`，纳入产品受控资源。
 2. 执行 SDK `init`，自动生成安装身份、随机主密钥和全部服务 clock，无需手写文件。
@@ -21,17 +21,17 @@ license-sdk request --config license-product.json --root ./license-data --servic
 license-sdk import --config license-product.json --root ./license-data --service gateway --file customer.license.json
 
 # Java：相同动作由可执行核心 JAR 提供，后续 status/request/import 参数相同。
-java -jar license-core-0.7.0.jar init --config license-product.json --root ./license-data
+java -jar license-core-0.7.1.jar init --config license-product.json --root ./license-data
 ```
 
-配置公开但决定信任，必须随产品固化；不要允许客户上传或覆盖。普通首次安装使用当前账号私有目录；已有安装保留原身份／key／clock，重复 init 只核对。多账号容器权限由产品部署负责，现有 ICP 装配不会自动迁移。新发行尚未远程发布，0.6.0 原制品保留。
+配置公开但决定信任，必须随产品固化；不要允许客户上传或覆盖。普通首次安装使用当前账号私有目录；已有安装保留原身份／key／clock，重复 init 只核对。多账号容器权限由产品部署负责，现有 ICP 装配不会自动迁移。正式制品由 GitHub Releases 提供，既有版本不覆盖。
 
 
-通用离线软件授权 SDK，独立于业务工程维护，提供 Java 和 Python 实现。当前版本为 `0.7.0`（本地统一构建，未远程发布），许可文件协议为 `schema_version = 1`；SDK 发行版本与文件协议版本分别管理。
+通用离线软件授权 SDK，独立于业务工程维护，提供 Java 和 Python 实现。当前源码版本为 `0.7.1`，正式制品见 GitHub Releases，许可文件协议为 `schema_version = 1`；SDK 发行版本与文件协议版本分别管理。
 
 提供配置加载、通用初始化、商业申请／安全导入、商业许可验签、安装身份观察、时间保护与预检。2026-10-22 起产品接入收敛为可配置的 HTTP 请求入口校验；各服务独立验证。后台任务准入、原任务续接及业务流程授权不在范围内；单服务签名时间恢复已实现，客户最终交付验收另行实施。
 
-产品接入请先读 [SDK 0.7.0 五步接入与升级](docs/integration-cn.md)，包含 Java/Python 完整构造示例、生命周期、请求 guard、包内清单和在线恢复适配；底层验签 API 不包含持久时间保护。
+产品接入请先读 [SDK 0.7.1 五步接入与升级](docs/integration-cn.md)，包含 Java/Python 完整构造示例、生命周期、请求 guard、包内清单和在线恢复适配；底层验签 API 不包含持久时间保护。
 
 ## 项目职责
 
@@ -73,7 +73,7 @@ SDK 会随客户运行制品交付，依赖包不能保证抵抗反编译或程�
 | [examples/](examples/README.md) | 最小宿主调用说明 |
 | `tools/` | 编码及真实签发文件的跨语言验证工具 |
 
-Java 暂用坐标为 `io.metor.license:license-core:0.7.0` 和 `io.metor.license:license-spring:0.7.0`。Python 分发名为 `metor-license-core`、`metor-license-fastapi`。正式发布组织及受控仓库地址尚待配置，当前未发布至远程制品仓库。
+Java 坐标为 `io.metor.license:license-core:0.7.1` 和 `io.metor.license:license-spring:0.7.1`。Python 分发名为 `metor-license-core`、`metor-license-fastapi`。从 GitHub Releases 下载完整 Maven 仓库包或 Python 平台离线包；下载与摘要校验见 [发行文档](docs/releasing.md)。
 
 Java 核心仅依赖 JDK；Jackson/JUnit 仅用于测试。Python 核心依赖 cryptography 和 PyJWT，当前分别锁定为 `46.0.7`、`2.15.1`；Java 框架适配层显式依赖 Nimbus/Jackson，并在产品中与宿主依赖约束对齐。通用核心不依赖业务工程、Spring 或 FastAPI。
 
@@ -86,7 +86,7 @@ Java 核心仅依赖 JDK；Jackson/JUnit 仅用于测试。Python 核心依赖 c
 ./gradlew :license-core:writeRuntimeClasspath
 ```
 
-核心 JAR 位于 `license-core/build/libs/license-core-0.7.0.jar`。本地发布验证命令为：
+核心 JAR 位于 `license-core/build/libs/license-core-0.7.1.jar`。本地发布验证命令为：
 
 ```sh
 ./gradlew publishAllPublicationsToVerificationRepository
@@ -183,7 +183,14 @@ python tools/verify_phase4_control.py
 
 ## 简化接入边界
 
-产品只配置需要保护的 HTTP 方法和路径。过滤器命中规则才调用本地 SDK；通过即继续，失败直接返回授权错误。未命中规则不检查授权，账号及数据权限保持原行为。Java 与 Python 各自验证自己的许可，不做联合预检或任务续接。固定关键方法首行可调用同一 guard；不改后台队列、重试、租约、业务实体或数据库迁移。此前 Phase 6 使用 SDK `0.6.0` 与 issuer `0.3.0`；本轮新增接入使用 SDK `0.7.0` 与 issuer `0.4.0` 的固定本地制品，消费者锁定实际摘要；保留既有 `0.4.0`，不使用实验性的 `0.5.0`。
+产品只配置需要保护的 HTTP 方法和路径。过滤器命中规则才调用本地 SDK；通过即继续，失败直接返回授权错误。未命中规则不检查授权，账号及数据权限保持原行为。Java 与 Python 各自验证自己的许可，不做联合预检或任务续接。固定关键方法首行可调用同一 guard；不改后台队列、重试、租约、业务实体或数据库迁移。此前 Phase 6 使用 SDK `0.6.0` 与 issuer `0.3.0`；新版接入使用 SDK `0.7.1` 与 issuer `0.4.0`，消费者使用正式发行件，消费者锁定实际摘要；保留既有 `0.4.0`，不使用实验性的 `0.5.0`。
+
+
+## 0.7.1：共享发布与只读核验
+
+多账号服务共享商业许可时，导入显式指定 `--shared-group 21000`；SDK 在原子替换前设置并确认组及 `0640`，默认仍为 `0600`，无需产品发布后修补。`check --config license-product.json --root ./license-data` 只核验身份、主密钥和全部服务 clock，不创建 Runtime／锁、不写文件，也不要求商业许可有效。备份前由产品停止写入或准备一致快照。
+
+Java 构建可下载 `license-sdk-java-maven-0.7.1.tar.gz`，保留原 Maven 坐标，不必手写 POM 或改用文件依赖。用法见 [共享发布／安装核验](docs/integration-cn.md#两个服务账号共享商业许可) 和 [发行说明](docs/releasing.md)。
 
 
 ## Phase 6：单服务签名时间恢复

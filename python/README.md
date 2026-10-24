@@ -2,10 +2,10 @@
 
 Download wheels or a complete platform bundle from [GitHub Releases](https://github.com/ifengkou/license-sdk/releases). See [release and offline installation](../docs/releasing.md) for CPython 3.12 platform selection, virtual environments, hash verification, and the CI release procedure. Install dependencies at product build time; application startup does not require network access.
 
-## Five-step quick start (0.7.0)
+## Five-step quick start (0.7.1)
 
 Linux/macOS, local filesystem, one process/Runtime per service. Install the prebuilt
-`metor-license-core==0.7.0` distribution (and `metor-license-fastapi==0.7.0` only
+`metor-license-core==0.7.1` distribution (and `metor-license-fastapi==0.7.1` only
 when using its FastAPI dependency). Offline installations also need the target
 platform dependency wheels. Do this at build/install time, never application startup.
 
@@ -25,6 +25,9 @@ platform dependency wheels. Do this at build/install time, never application sta
    SDK creates identity, random master key and all service clocks. Repeated init
    returns `ALREADY_INITIALIZED` without changing those bytes. Damaged installs
    must be investigated or recovered, never deleted/reinitialized as a workaround.
+   To validate an existing installation without initializing or changing it, run
+   `license-sdk check --config ./license-product.json --root ./license-data`.
+   It checks every configured service and needs no service choice or machine-id.
 3. Create one Runtime from the resource, start it for the process lifecycle and
    close it on shutdown. For a package named `your_product` with the JSON included:
 
@@ -80,18 +83,71 @@ Same-file retries confirm durability without extending validity or claiming ACTI
 HTTP adapters enforce their own admin authentication, upload size/CSRF/no-store and
 error mapping; the SDK handles verification and publication.
 
+## Shared publication and read-only installation checks
+
+Import defaults to a private `0600` commercial file. If separate service accounts
+must read the same license, select the deployment's numeric group explicitly:
+
+```python
+result = runtime.import_license(raw, expected_file_digest, shared_group=12345)
+```
+
+The equivalent CLI option is `license-sdk import ... --shared-group 12345`.
+Replace `12345` with the group provided by your deployment. The publisher must
+have permission to assign that group; the SDK does not create OS accounts or
+groups. The GID must be an integer from 0 to 2147483647. This local deployment
+option is not part of `license-product.json` or signed license data.
+
+The SDK writes a private temporary file, sets and confirms its group and `0640`
+permissions, syncs it and only then atomically replaces the commercial file under
+the existing import lock. Attribute failures before replacement preserve the old
+file. An unconfirmed directory sync after replacement returns `OUTCOME_UNKNOWN`.
+Do not add a chmod/chgrp step after import. Identity keys, clocks and recovery
+files are unaffected. Same-byte retries confirm the requested attributes; if
+needed, the SDK republishes the same bytes atomically and returns
+`ALREADY_APPLIED`. This can confirm an expired license without extending it or
+claiming it is active.
+
+For backup or upgrade tooling, use the public read-only validator:
+
+```python
+from license_sdk.installation import validate_installation
+from license_sdk.product import ProductConfig
+
+installation_id = validate_installation(ProductConfig.from_bytes(config_bytes), license_root)
+```
+
+It validates the completed identity, 32-byte master key and all configured service
+clocks using the SDK's existing HMAC codec. It returns the installation ID or
+raises `OnboardingError` with code `LICENSE_INSTALLATION_INVALID`. It does not
+create a Runtime, lock, directory or checkpoint, and works with a read-only mount.
+It does not read the commercial license, machine-id or current time: a missing
+or expired license and a clock high watermark ahead of UTC do not invalidate an
+otherwise complete installation. A malformed or incorrectly authenticated clock
+does fail. For an incomplete installation, use the explicit init workflow after
+investigation; check never repairs it.
+
+`license-sdk check --config ... --root ...` calls the same validator and returns
+`{"installationId":"..."}` on success. Stop all installation writers or validate
+a consistent snapshot first: a read-only check does not make a live multi-file
+snapshot atomic. Archive paths, permissions and restore policy remain the
+deployment tool's responsibility.
+
 
 [中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
 
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal
-SDK development only; published adapter metadata pins `metor-license-core==0.7.0`.
+SDK development only; published adapter metadata pins `metor-license-core==0.7.1`.
 
 Phase 1 implements product profiles, host/install binding digests, manual request/recovery
 code codecs, packaged public vectors, a local guard protocol and a thin FastAPI adapter.
 Phase 2 adds strict commercial payload validation, raw-byte Ed25519 verification and
 TERM/PERPETUAL × HOST_INSTALL/UNBOUND evaluation. Phase 3 adds strict installation/clock observation and durable monotonic clock protection.
-Phase 6 adds single-service recovery in the same runtime. Version 0.7.0 adds the configuration, initialization, import and lifecycle entry points above; existing 0.6.0 artifacts remain unchanged. The adapter requires an injected guard; no permissive default
+Phase 6 adds single-service recovery in the same runtime. Version 0.7.0 introduced
+the configuration, initialization, import and lifecycle entry points; 0.7.1 adds
+shared publication and read-only installation validation. Existing 0.6.0 and
+0.7.0 artifacts remain unchanged. The adapter requires an injected guard; no permissive default
 runtime is provided. It must run after host authentication; hosts choose protected entry points.
 
 Run `uv sync --all-packages` once, then `uv lock --check`, `uv run --locked ruff check .`,

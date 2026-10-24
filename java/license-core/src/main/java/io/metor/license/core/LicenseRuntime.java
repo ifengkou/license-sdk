@@ -155,11 +155,19 @@ public final class LicenseRuntime implements LicenseGuard, AutoCloseable {
     public ImportResult importLicense(byte[] raw, String expectedFileDigest) throws IOException {
         return importLicense(raw, expectedFileDigest, new OnboardingFiles());
     }
+    /** Publish for a numeric POSIX group (0640); null retains private 0600 publication. */
+    public ImportResult importLicense(byte[] raw, String expectedFileDigest, String sharedGroup) throws IOException {
+        return importLicense(raw, expectedFileDigest, sharedGroup, new OnboardingFiles());
+    }
     ImportResult importLicense(byte[] raw, String expectedFileDigest, OnboardingFiles files) throws IOException {
+        return importLicense(raw, expectedFileDigest, null, files);
+    }
+    ImportResult importLicense(byte[] raw, String expectedFileDigest, String sharedGroup, OnboardingFiles files) throws IOException {
         if (raw == null || raw.length < 1 || raw.length > CommercialLicenseVerifier.MAX_FILE_BYTES)
             throw new OnboardingException(OnboardingException.Code.CANDIDATE_REJECTED);
         if (expectedFileDigest != null && !expectedFileDigest.matches("[0-9a-f]{64}"))
             throw new IllegalArgumentException("Expected raw file digest must be SHA-256 or null for absent");
+        Integer group = OnboardingFiles.sharedGroup(sharedGroup);
         byte[] candidate = raw.clone();
         String candidateDigest = digest(candidate);
         Path target = OnboardingFiles.checked(config.licenseFile());
@@ -170,6 +178,18 @@ public final class LicenseRuntime implements LicenseGuard, AutoCloseable {
                     throw new OnboardingException(OnboardingException.Code.LICENSE_STATE_CONFLICT);
                 if (candidateDigest.equals(actual)) {
                     preflight(candidate); // Same-byte confirmation still validates signature, scope and actual binding.
+                    boolean attributesMatch;
+                    try { attributesMatch = files.attributesMatch(target, group); }
+                    catch (IOException | UnsupportedOperationException error) {
+                        return importResult(ImportActionStatus.OUTCOME_UNKNOWN, candidateDigest);
+                    }
+                    if (!attributesMatch) {
+                        StateStore.CommitOutcome repaired = files.publish(target, candidate, group);
+                        if (repaired == StateStore.CommitOutcome.NOT_COMMITTED)
+                            throw new OnboardingException(OnboardingException.Code.STORAGE_FAILED);
+                        return importResult(repaired == StateStore.CommitOutcome.COMMITTED ? ImportActionStatus.ALREADY_APPLIED
+                            : ImportActionStatus.OUTCOME_UNKNOWN, candidateDigest);
+                    }
                     boolean confirmed;
                     try { confirmed = files.confirm(target, candidate); }
                     catch (IOException | UnsupportedOperationException error) {
@@ -181,7 +201,7 @@ public final class LicenseRuntime implements LicenseGuard, AutoCloseable {
                 CommercialLicenseVerifier.VerifiedLicense checked = preflight(candidate);
                 if (checked.status() != CommercialLicenseVerifier.Status.ACTIVE)
                     throw new OnboardingException(OnboardingException.Code.CANDIDATE_REJECTED);
-                StateStore.CommitOutcome outcome = files.publish(target, candidate);
+                StateStore.CommitOutcome outcome = files.publish(target, candidate, group);
                 if (outcome == StateStore.CommitOutcome.NOT_COMMITTED)
                     throw new OnboardingException(OnboardingException.Code.STORAGE_FAILED);
                 return importResult(outcome == StateStore.CommitOutcome.COMMITTED ? ImportActionStatus.APPLIED

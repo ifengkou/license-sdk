@@ -2,7 +2,7 @@
 
 SDK 发行与下载见 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 和 [发行／离线安装文档](docs/releasing.md)。推送版本 tag 后，CI 构建 Java JAR、Python wheel 和目标平台完整离线依赖包。
 
-## 新产品五步接入（0.7.0）
+## 新产品五步接入（0.7.1）
 
 1. 安装本语言 SDK，从 Issuer 的“SDK 接入配置”下载 `license-product.json`，纳入产品受控资源。
 2. 执行 SDK `init`，自动生成安装身份、随机主密钥和全部服务 clock，无需手写文件。
@@ -21,13 +21,13 @@ license-sdk request --config license-product.json --root ./license-data --servic
 license-sdk import --config license-product.json --root ./license-data --service gateway --file customer.license.json
 
 # Java：相同动作由可执行核心 JAR 提供，后续 status/request/import 参数相同。
-java -jar license-core-0.7.0.jar init --config license-product.json --root ./license-data
+java -jar license-core-0.7.1.jar init --config license-product.json --root ./license-data
 ```
 
-配置公开但决定信任，必须随产品固化；不要允许客户上传或覆盖。普通首次安装使用当前账号私有目录；已有安装保留原身份／key／clock，重复 init 只核对。多账号容器权限由产品部署负责，现有 ICP 装配不会自动迁移。新发行尚未远程发布，0.6.0 原制品保留。
+配置公开但决定信任，必须随产品固化；不要允许客户上传或覆盖。普通首次安装使用当前账号私有目录；已有安装保留原身份／key／clock，重复 init 只核对。多账号容器权限由产品部署负责，现有 ICP 装配不会自动迁移。正式制品由 GitHub Releases 提供，既有版本不覆盖。
 
 
-[中文使用说明](README_cn.md) · [0.7.0 五步接入与升级](docs/integration-cn.md)
+[中文使用说明](README_cn.md) · [0.7.1 五步接入与升级](docs/integration-cn.md)
 
 独立于业务工程的离线许可 SDK。提供商业文件验签、安装身份观察、持久化时间保护和 HTTP 入口使用的本地校验结果。产品在受控请求入口及少数固定关键方法首行调用同一 guard，各服务独立验证，不深入后台业务流程。
 
@@ -42,7 +42,7 @@ java -jar license-core-0.7.0.jar init --config license-product.json --root ./lic
 - `python/`：独立发布的 `metor-license-core` 与 `metor-license-fastapi`，通过 uv 构建。
 - `examples/`：最小宿主验签调用说明；实际 CLI 与双语言回归见 `tools/verify_phase2_cross_language.py`。
 
-目标版本 `0.7.0`（本地统一构建，未远程发布）、Maven group `io.metor.license` 及 Python 分发名前缀 `metor-license-`。这是本地验证坐标，发布组织和私有仓库地址尚待确认，未发布到远程仓库。Java/Python SDK 发行号与许可 schema_version 是独立概念；当前文件校验不表示业务产品已启用授权保护。
+SDK 版本 `0.7.1`，Maven group `io.metor.license`，Python 分发名前缀 `metor-license-`。正式制品通过 GitHub Releases 发行，包含本地 Maven 仓库包；不发布到 Maven Central 或 PyPI。Java/Python SDK 发行号与许可 schema_version 是独立概念；当前文件校验不表示业务产品已启用授权保护。
 
 SDK 会随客户运行制品交付；依赖包不是防反编译边界。测试向量无客户数据或商业私钥。
 
@@ -51,6 +51,13 @@ Phase 4 的 Java `license-spring` 使用 Nimbus/Jackson，Python 核心使用 Py
 2026-10-22 简化决策：仅对产品配置的关键 API 做入口校验，未匹配请求直接放行；不引入 ExecutionGate、TASK 证明或服务间联动验证。Phase 5.5 改用统一 `requireValid` / `require_valid` 入口，移除历史只读/操作分类；回拨容差为一天，商业期限仍精确判断。既有 `0.4.0` 制品不覆盖，实验性 `0.5.0` 已撤回。5.5/6B/6C 已合并为本地统一构建的 `0.6.0` 制品，尚未远程发布。
 
 客户部署使用我方预制镜像或完整运行安装包：SDK 与全部运行依赖在我方构建期预装，客户启动不执行 Gradle/Maven/pip/uv 安装、不访问公网。Python 单个 SDK wheel 不包含 cryptography/PyJWT 的全部依赖，独立离线接入须同时提供目标平台完整 wheelhouse。
+
+
+## 0.7.1：共享发布与只读核验
+
+多账号服务共享商业许可时，导入显式指定 `--shared-group 21000`；SDK 在原子替换前设置并确认组及 `0640`，默认仍为 `0600`，无需产品发布后修补。`check --config license-product.json --root ./license-data` 只核验身份、主密钥和全部服务 clock，不创建 Runtime／锁、不写文件，也不要求商业许可有效。备份前由产品停止写入或准备一致快照。
+
+Java 构建可下载 `license-sdk-java-maven-0.7.1.tar.gz`，保留原 Maven 坐标，不必手写 POM 或改用文件依赖。用法见 [共享发布／安装核验](docs/integration-cn.md#两个服务账号共享商业许可) 和 [发行说明](docs/releasing.md)。
 
 
 ## Phase 6：单服务签名时间恢复
@@ -69,7 +76,7 @@ Python `RecoveryRequest.to_dict()/to_bytes()` 返回可保存的申请；`Recove
 export JAVA_HOME=/absolute/jdk-21
 export PATH="$JAVA_HOME/bin:$PATH"
 license-issuer/.venv/bin/python license-sdk/tools/verify_phase6_recovery.py \
-  --java-jar /absolute/vendor/license-core-0.7.0.jar
+  --java-jar /absolute/vendor/license-core-0.7.1.jar
 ```
 
 该工具真实调用 issuer CLI，以完整临时 issuer.toml、合成密钥和目录验证 ICP 及另一产品、各两服务、两语言、文件与手抄输入、三种异常、同 Runtime 申请／应用／状态刷新／重复和重启后幂等。另一产品使用实际机器与域派生 HOST_INSTALL 绑定，并检查错产品／服务／恢复域／申请前缀／key／签名／窗口／目标拒绝，以及商业文件和另一服务 clock 原字节不变。`tools/verify_phase2_cross_language.py` 保留 ICP 合成负向语料，并验证另一产品商业四组合及错产品／绑定拒绝。客户不接收 issuer、商业私钥或签发记录；没有 sign-policy 命令，包内 API 清单由产品构建摘要保护。

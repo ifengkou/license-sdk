@@ -1,4 +1,4 @@
-"""Offline license SDK core, target version 0.7.0 (not yet released)."""
+"""Framework-independent offline license SDK core."""
 
 from license_sdk.codes import CodeError, CodeErrorReason, decode_code, encode_code
 from license_sdk.guard import LicenseDeniedError, LicenseGuard

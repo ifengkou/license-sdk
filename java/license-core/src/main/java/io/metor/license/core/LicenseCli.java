@@ -16,16 +16,17 @@ public final class LicenseCli {
 
     static int run(String[] args, PrintStream output, PrintStream error) {
         if (args.length == 0 || Arrays.asList(args).contains("--help")) {
-            output.println("Usage: java -jar license-core-0.7.0.jar <init|status|request|import> --config FILE --root DIR "
-                + "[--service ID] [--machine-id FILE] [request: --output FILE] [import: --file FILE]");
+            output.println("Usage: java -jar license-core-0.7.1.jar <init|check|status|request|import> --config FILE --root DIR "
+                + "[--service ID] [--machine-id FILE] [request: --output FILE] [import: --file FILE [--shared-group GID]]");
             return 0;
         }
         try {
             String command = args[0];
-            if (!Set.of("init", "status", "request", "import").contains(command)) throw new IllegalArgumentException();
+            if (!Set.of("init", "check", "status", "request", "import").contains(command)) throw new IllegalArgumentException();
             Set<String> allowed = switch (command) {
+                case "check" -> Set.of("--config", "--root");
                 case "request" -> Set.of("--config", "--root", "--service", "--machine-id", "--output");
-                case "import" -> Set.of("--config", "--root", "--service", "--machine-id", "--file");
+                case "import" -> Set.of("--config", "--root", "--service", "--machine-id", "--file", "--shared-group");
                 default -> Set.of("--config", "--root", "--service", "--machine-id");
             };
             Map<String, String> options = new LinkedHashMap<>();
@@ -38,6 +39,10 @@ public final class LicenseCli {
             var files = new OnboardingFiles();
             byte[] config = files.read(configFile, ProductConfig.MAX_BYTES);
             ProductConfig product = ProductConfig.parse(config);
+            if (command.equals("check")) {
+                output.println(json(Map.of("installationId", LicenseInstallation.validate(product, root).toString())));
+                return 0;
+            }
             if (command.equals("init")) {
                 if (options.containsKey("--service")) product.selectService(options.get("--service"));
                 var result = LicenseInstallation.initialize(product, root);
@@ -65,7 +70,7 @@ public final class LicenseCli {
                     case "import" -> {
                         byte[] candidate = files.read(Path.of(required(options, "--file")), CommercialLicenseVerifier.MAX_FILE_BYTES);
                         String expected = runtime.licenseFileDigest();
-                        var result = runtime.importLicense(candidate, expected);
+                        var result = runtime.importLicense(candidate, expected, options.get("--shared-group"));
                         var view = new LinkedHashMap<String, Object>();
                         view.put("actionStatus", result.actionStatus().name()); view.put("fileDigest", result.fileDigest());
                         view.put("status", result.status() == null ? null : snapshot(result.status()));

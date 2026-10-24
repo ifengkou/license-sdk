@@ -10,8 +10,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +48,142 @@ def checksums(directory: Path) -> None:
     (directory / "SHA256SUMS").write_text(
         "".join(f"{sha256(p)}  {p.relative_to(directory).as_posix()}\n" for p in files)
     )
+
+
+def maven_paths(release: str) -> list[Path]:
+    return [
+        Path("io/metor/license")
+        / f"license-{module}"
+        / release
+        / f"license-{module}-{release}{suffix}"
+        for module in ("core", "spring")
+        for suffix in (".jar", "-sources.jar", "-javadoc.jar", ".pom", ".module")
+    ]
+
+
+def validate_maven(files: dict[Path, bytes], release: str) -> None:
+    if set(files) != set(maven_paths(release)):
+        raise ValueError("Maven repository must contain both complete SDK publications")
+    ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+    for module in ("core", "spring"):
+        artifact = f"license-{module}"
+        base = Path("io/metor/license") / artifact / release / f"{artifact}-{release}"
+        pom = ET.fromstring(files[Path(f"{base}.pom")])
+        if [
+            pom.findtext(f"m:{key}", namespaces=ns) for key in ("groupId", "artifactId", "version")
+        ] != ["io.metor.license", artifact, release]:
+            raise ValueError("Maven POM coordinates do not match the release")
+        if module == "spring" and not any(
+            dependency.findtext("m:groupId", namespaces=ns) == "io.metor.license"
+            and dependency.findtext("m:artifactId", namespaces=ns) == "license-core"
+            and dependency.findtext("m:version", namespaces=ns) == release
+            for dependency in pom.findall("m:dependencies/m:dependency", ns)
+        ):
+            raise ValueError("Spring POM must require the matching core version")
+        metadata = json.loads(files[Path(f"{base}.module")])
+        component = metadata["component"]
+        if (component["group"], component["module"], component["version"]) != (
+            "io.metor.license",
+            artifact,
+            release,
+        ):
+            raise ValueError("Gradle module coordinates do not match the release")
+        if module == "spring":
+            for name in ("apiElements", "runtimeElements"):
+                variants = [variant for variant in metadata["variants"] if variant["name"] == name]
+                dependencies = [
+                    dependency
+                    for variant in variants
+                    for dependency in variant.get("dependencies", [])
+                    if dependency.get("group") == "io.metor.license"
+                    and dependency.get("module") == "license-core"
+                ]
+                if (
+                    len(variants) != 1
+                    or len(dependencies) != 1
+                    or dependencies[0].get("version") != {"requires": release}
+                ):
+                    raise ValueError(
+                        "Spring Gradle metadata must require the matching core version"
+                    )
+        for variant in metadata["variants"]:
+            for entry in variant.get("files", []):
+                path = base.parent / entry["name"]
+                if path not in files or entry["url"] != entry["name"]:
+                    raise ValueError("Gradle module references an unexpected file")
+                raw = files[path]
+                if entry["size"] != len(raw) or entry["sha256"] != hashlib.sha256(raw).hexdigest():
+                    raise ValueError("Gradle module file hash does not match its JAR")
+
+
+def maven_bundle(repository: Path, dist: Path, output: Path) -> None:
+    release = version()
+    name = f"license-sdk-java-maven-{release}"
+    output.mkdir(parents=True, exist_ok=True)
+    if (output / f"{name}.tar.gz").exists():
+        raise ValueError("refusing to replace an existing Maven bundle")
+    files = {}
+    for relative in maven_paths(release):
+        path = repository / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"missing regular Maven publication file: {relative}")
+        files[relative] = path.read_bytes()
+    validate_maven(files, release)
+    for relative, raw in files.items():
+        if relative.suffix == ".jar":
+            matches = list(dist.glob(f"*/build/libs/{relative.name}"))
+            if len(matches) != 1 or matches[0].read_bytes() != raw:
+                raise ValueError(f"Maven and standalone JAR differ: {relative.name}")
+    with tempfile.TemporaryDirectory(prefix="license-maven-") as temporary:
+        bundle = Path(temporary) / name
+        for relative, raw in files.items():
+            target = bundle / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+        (bundle / "README.txt").write_text(
+            f"License SDK {release} local Maven repository. JDK 21 required.\n"
+            "Use this extracted directory as your Maven/Gradle repository URL.\n"
+            f"Core: io.metor.license:license-core:{release}\n"
+            f"Optional CONTROL adapter: io.metor.license:license-spring:{release}\n"
+            "Only SDK artifacts are bundled; prepare third-party dependencies separately.\n"
+            "Verify SHA256SUMS before building. Product configuration comes from your Issuer.\n"
+        )
+        checksums(bundle)
+        shutil.make_archive(str(output / name), "gztar", root_dir=temporary, base_dir=name)
+
+
+def verify_maven_bundle(archive: Path, assets: Path, release: str) -> None:
+    prefix = f"license-sdk-java-maven-{release}/"
+    files: dict[Path, bytes] = {}
+    with tarfile.open(archive, "r:gz") as stream:
+        for member in stream:
+            if member.isdir():
+                continue
+            if not member.isfile() or not member.name.startswith(prefix) or member.size > 16777216:
+                raise ValueError("unexpected Maven archive entry")
+            relative = Path(member.name[len(prefix) :])
+            if relative in files or relative not in {
+                *maven_paths(release),
+                Path("README.txt"),
+                Path("SHA256SUMS"),
+            }:
+                raise ValueError("unexpected or duplicate Maven archive file")
+            content = stream.extractfile(member)
+            if content is None:
+                raise ValueError("missing Maven archive content")
+            files[relative] = content.read()
+    manifest = files.pop(Path("SHA256SUMS"))
+    expected = "".join(
+        f"{hashlib.sha256(raw).hexdigest()}  {path.as_posix()}\n"
+        for path, raw in sorted(files.items())
+    ).encode()
+    if manifest != expected:
+        raise ValueError("Maven archive internal checksums do not match")
+    files.pop(Path("README.txt"))
+    validate_maven(files, release)
+    for path, raw in files.items():
+        if path.suffix == ".jar" and (assets / path.name).read_bytes() != raw:
+            raise ValueError(f"Maven and standalone JAR differ: {path.name}")
 
 
 def wheelhouse(dist: Path, output: Path, offline: bool) -> None:
@@ -207,6 +345,7 @@ def assemble(inputs: Path, output: Path) -> None:
         raise ValueError("release output directory must be empty")
     # An allowlist prevents unrelated build output or product configuration entering a release.
     expected = {
+        f"license-sdk-java-maven-{release}.tar.gz",
         *(
             f"license-{module}-{release}{classifier}.jar"
             for module in ("core", "spring")
@@ -233,6 +372,7 @@ def assemble(inputs: Path, output: Path) -> None:
         if len({sha256(path) for path in matches}) != 1:
             raise ValueError(f"different builds for the same asset: {name}")
         shutil.copy2(matches[0], output / name)
+    verify_maven_bundle(output / f"license-sdk-java-maven-{release}.tar.gz", output, release)
     checksums(output)
     print(f"Ready: {len(expected)} assets + SHA256SUMS for v{release}")
 
@@ -242,6 +382,10 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check-version")
     check.add_argument("--tag")
+    maven = sub.add_parser("maven")
+    maven.add_argument("--repository", type=Path, required=True)
+    maven.add_argument("--dist", type=Path, required=True)
+    maven.add_argument("--output", type=Path, required=True)
     bundle = sub.add_parser("wheelhouse")
     bundle.add_argument("--dist", type=Path, required=True)
     bundle.add_argument("--output", type=Path, required=True)
@@ -252,6 +396,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "check-version":
         print(version(args.tag))
+    elif args.command == "maven":
+        maven_bundle(args.repository.resolve(), args.dist.resolve(), args.output.resolve())
     elif args.command == "wheelhouse":
         wheelhouse(args.dist.resolve(), args.output.resolve(), args.offline)
     else:

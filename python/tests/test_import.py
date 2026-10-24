@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import stat
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -247,3 +248,131 @@ def test_two_runtime_threads_cas_at_most_one_publish(prepared, product):
         results = list(pool.map(attempt, range(2)))
     assert results.count("APPLIED") == 1
     assert results.count("LICENSE_STATE_CONFLICT") == 1
+
+
+def test_shared_attributes_ready_before_replace_and_default_stays_private(
+    prepared, product, monkeypatch
+):
+    root = prepared.paths.root
+    path = root / "shared/active.license.json"
+    unchanged = {
+        file: (file.read_bytes(), stat.S_IMODE(file.stat().st_mode))
+        for file in root.rglob("*")
+        if file.is_file()
+    }
+    first = signed(product)
+    prepared.import_license(first, None)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    raw = signed(product)
+    replace = os.replace
+    observed = []
+
+    def check_before_replace(source, target):
+        details = os.stat(source, follow_symlinks=False)
+        assert details.st_gid == os.getgid()
+        assert stat.S_IMODE(details.st_mode) == 0o640
+        assert path.read_bytes() == first
+        observed.append(source)
+        replace(source, target)
+
+    monkeypatch.setattr(os, "replace", check_before_replace)
+    result = prepared.import_license(raw, prepared.license_file_digest(), shared_group=os.getgid())
+    assert result.action_status == "APPLIED"
+    assert observed and path.read_bytes() == raw
+    assert path.stat().st_gid == os.getgid()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    for file, before in unchanged.items():
+        assert (file.read_bytes(), stat.S_IMODE(file.stat().st_mode)) == before
+
+
+def test_same_bytes_shared_attributes_repaired_atomically_then_confirmed(
+    prepared, product, monkeypatch
+):
+    raw = signed(product)
+    prepared.import_license(raw, None)
+    path = prepared.paths.root / "shared/active.license.json"
+    old_inode = path.stat().st_ino
+    digest = prepared.license_file_digest()
+    result = prepared.import_license(raw, digest, shared_group=os.getgid())
+    assert result.action_status == "ALREADY_APPLIED"
+    assert result.status.state == RuntimeState.ACTIVE
+    assert path.read_bytes() == raw and path.stat().st_ino != old_inode
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    inode = path.stat().st_ino
+
+    def unexpected_replace(*args):
+        raise AssertionError("matching attributes must not republish")
+
+    monkeypatch.setattr(os, "replace", unexpected_replace)
+    assert prepared.import_license(raw, digest, shared_group=os.getgid()).action_status == (
+        "ALREADY_APPLIED"
+    )
+    assert path.stat().st_ino == inode
+
+
+@pytest.mark.parametrize("failure", ["group", "mode", "unconfirmed"])
+@pytest.mark.parametrize("same_bytes", [False, True])
+def test_shared_attribute_failure_preserves_old_bytes_and_attributes(
+    prepared, product, monkeypatch, failure, same_bytes
+):
+    raw = signed(product)
+    prepared.import_license(raw, None)
+    path = prepared.paths.root / "shared/active.license.json"
+    before = path.stat()
+    candidate = raw if same_bytes else signed(product)
+
+    def fail(*args):
+        raise PermissionError("injected attribute failure")
+
+    group = os.getgid()
+    if failure == "group":
+        monkeypatch.setattr(os, "fchown", fail)
+    elif failure == "mode":
+        monkeypatch.setattr(os, "fchmod", fail)
+    else:
+        group += 1
+        monkeypatch.setattr(os, "fchown", lambda *args: None)
+    with pytest.raises(OnboardingError) as exc:
+        prepared.import_license(candidate, prepared.license_file_digest(), shared_group=group)
+    assert exc.value.code == "LICENSE_STORAGE_FAILED"
+    after = path.stat()
+    assert path.read_bytes() == raw
+    assert (after.st_ino, after.st_gid, after.st_mode) == (
+        before.st_ino,
+        before.st_gid,
+        before.st_mode,
+    )
+    assert not list(path.parent.glob(".license-import-*"))
+
+
+def test_expired_same_bytes_can_repair_shared_attributes(prepared, product):
+    raw = signed(
+        product,
+        validity_type="TERM",
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    prepared.import_license(raw, None)
+
+    class Later:
+        def wall_now(self):
+            return datetime.now(UTC) + timedelta(days=3)
+
+        def monotonic_ns(self):
+            return prepared._monotonic + 1
+
+    prepared.time = Later()
+    result = prepared.import_license(raw, prepared.license_file_digest(), shared_group=os.getgid())
+    assert result.action_status == "ALREADY_APPLIED"
+    assert result.status.state == RuntimeState.EXPIRED
+    assert (
+        stat.S_IMODE((prepared.paths.root / "shared/active.license.json").stat().st_mode) == 0o640
+    )
+
+
+@pytest.mark.parametrize("group", [-1, True, "staff", 1.0, 1 << 31])
+def test_invalid_shared_group_rejected_before_lock_or_publish(prepared, product, group):
+    root = prepared.paths.root
+    before = sorted(root.rglob("*"))
+    with pytest.raises(ValueError, match="numeric GID"):
+        prepared.import_license(signed(product), None, shared_group=group)
+    assert sorted(root.rglob("*")) == before

@@ -1,4 +1,4 @@
-# SDK 0.7.0：五步接入与升级
+# SDK 0.7.1：五步接入与升级
 
 只需要本语言 SDK、从 Issuer 下载的一份公开配置，以及客户授权目录。SDK 自动初始化安装资料、导出申请、安全导入许可和维护 checkpoint；无需手工制作安装 JSON、随机密钥、clock 或文件发布脚本。
 
@@ -6,7 +6,7 @@
 
 ## 第一步：准备依赖，下载并固化配置
 
-SDK 从 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 下载。Java 选择核心 JAR；Python 离线安装选择与系统、CPU 和 CPython 3.12 匹配的完整包。具体下载、摘要校验、虚拟环境安装和维护者发行流程见 [发行与离线安装](releasing.md)。
+SDK 从 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 下载。Java CLI 选择核心 JAR，Maven／Gradle 构建选择完整 Maven 仓库包；Python 离线安装选择与系统、CPU 和 CPython 3.12 匹配的完整包。具体下载、摘要校验、虚拟环境安装和维护者发行流程见 [发行与离线安装](releasing.md)。
 开发者在对应产品的 Issuer 实例解锁，进入 **SDK 接入配置**，下载 `license-product.json`。它包含产品 ID、服务映射、三个算法域、申请前缀和 key_id → 公开 Ed25519 公钥，无需逐字段复制。
 
 这是**产品信任资源**：随产品构建固化，不是客户可上传的运行配置。应用从自己的包资源读取，不允许业务 HTTP、环境变量或客户可写授权目录覆盖信任。Issuer 私钥、口令及记录留在签发端，不能加入客户产品。
@@ -16,24 +16,24 @@ SDK 从 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 下�
 在产品虚拟环境中安装已交付的制品：
 
 ```bash
-python -m pip install --no-index --find-links ./wheelhouse metor-license-core==0.7.0
+python -m pip install --no-index --find-links ./wheelhouse metor-license-core==0.7.1
 ```
 
-`wheelhouse` 必须是发行方准备的目标平台完整依赖目录，包含 core、cryptography、PyJWT 及传递依赖；单个 SDK wheel 不包含这些依赖。FastAPI 示例另需产品已安装 FastAPI，显式依赖适配器可用 `metor-license-fastapi==0.7.0`。日常启动不运行 pip/uv，不连接 Issuer 或制品仓库。
+`wheelhouse` 必须是发行方准备的目标平台完整依赖目录，包含 core、cryptography、PyJWT 及传递依赖；单个 SDK wheel 不包含这些依赖。FastAPI 示例另需产品已安装 FastAPI，显式依赖适配器可用 `metor-license-fastapi==0.7.1`。日常启动不运行 pip/uv，不连接 Issuer 或制品仓库。
 
 把同一份配置复制到你的 Python 包，例如 `my_product/license-product.json`，并在构建规则中包含该 JSON。CLI 安装操作先使用工作目录中的原始下载文件。
 
 ### Java 21
 
-将已交付的 `license-core-0.7.0.jar` 放在工作目录，就可直接执行后面的 CLI。核心只依赖 JDK，不需要 Spring、Python 或其他产品源码。应用构建可使用受控制品仓库的依赖：
+将已交付的 `license-core-0.7.1.jar` 放在工作目录，就可直接执行后面的 CLI。核心只依赖 JDK，不需要 Spring、Python 或其他产品源码。应用构建可使用受控制品仓库的依赖：
 
 ```groovy
 dependencies {
-    implementation 'io.metor.license:license-core:0.7.0'
+    implementation 'io.metor.license:license-core:0.7.1'
 }
 ```
 
-当前坐标为本地验证发行，尚未发布到公共 Maven/PyPI；制作方交付 JAR/wheel 和摘要，或配置自己的受控制品仓库。将公开配置放在 `src/main/resources/license-product.json`，确保构建后位于 classpath 根目录。`license-spring` 仅在需要独立 CONTROL 证明能力时引入，普通 guard 不依赖它。
+从 Release 下载 `license-sdk-java-maven-0.7.1.tar.gz`，校验并解压到产品受控的本地 Maven 仓库，将该目录配置为 repositories 中的 Maven URL，再使用上面的坐标；完整命令见 [发行文档](releasing.md#java使用-mavengradle-坐标)。无需手写 POM，也不依赖 Maven Local 或 SDK 源码。SDK 不发布到 Maven Central／PyPI。将公开配置放在 `src/main/resources/license-product.json`，确保构建后位于 classpath 根目录。`license-spring` 仅在需要独立 CONTROL 证明能力时引入，普通 guard 不依赖它。
 
 **本步预期：** SDK 可用，工作目录有 `license-product.json`，产品构建内也包含同一份公开资源。
 
@@ -51,8 +51,8 @@ license-sdk status --config license-product.json --root ./license-data --service
 Java：
 
 ```bash
-java -jar license-core-0.7.0.jar init --config license-product.json --root ./license-data
-java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service gateway
+java -jar license-core-0.7.1.jar init --config license-product.json --root ./license-data
+java -jar license-core-0.7.1.jar status --config license-product.json --root ./license-data --service gateway
 ```
 
 首次返回 `INITIALIZED`，查询得到 `UNLICENSED`，说明资料已准备好、尚无商业许可。SDK 自动初始化**全部配置服务**；重复 init 返回 `ALREADY_INITIALIZED`，核对原资料，不更新身份、密钥或时间高水位。
@@ -147,10 +147,10 @@ license-sdk status --config license-product.json --root ./license-data --service
 Java：
 
 ```bash
-java -jar license-core-0.7.0.jar request --config license-product.json --root ./license-data --service gateway --output request.json
+java -jar license-core-0.7.1.jar request --config license-product.json --root ./license-data --service gateway --output request.json
 # 把签发下载文件保存为当前目录的 customer.license.json。
-java -jar license-core-0.7.0.jar import --config license-product.json --root ./license-data --service gateway --file customer.license.json
-java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service gateway
+java -jar license-core-0.7.1.jar import --config license-product.json --root ./license-data --service gateway --file customer.license.json
+java -jar license-core-0.7.1.jar status --config license-product.json --root ./license-data --service gateway
 ```
 
 申请由真实安装和机器标识生成，不含机器 ID 原文／安装主密钥。选择无绑定商业许可可跳过申请，直接让签发人员选择 UNBOUND。`TERM/PERPETUAL × HOST_INSTALL/UNBOUND` 四种组合均保留。
@@ -227,7 +227,33 @@ SDK 自动维护稳定挑战、目标、原子提交和实例刷新。恢复只�
 
 本机 POSIX（Linux／macOS）且无符号链接路径；普通目录由当前账号持有，默认 0700／0600。每服务一个进程、一个 Runtime，独立 state。服务可共享产品身份和商业文件；新增安装／导入锁双语言互通不代表可以双进程维护同一服务 clock。Windows、网络盘和多副本状态共享不在本版支持范围。
 
-多账号容器由部署层准备 UID/GID、组权限及挂载，SDK 不递归 chown、不放宽既有权限。ICP Diag 继续用原 deployment `license-init`、`/run/icp-license` 和真实宿主 `/run/icp-host/machine-id`；Metor／AI 生产装配不由本次自动迁移。不要直接把普通单用户初始化权限套到 ICP 多 UID 容器。
+多账号容器由部署层准备 UID/GID、组权限及挂载，SDK 不递归 chown。不要直接把普通单用户初始化权限套到多 UID 容器。ICP Diag 的 Metor／AI 生产装配须另行迁移验收，SDK 升级不会自动修改产品或既有部署。
+
+### 两个服务账号共享商业许可
+
+默认 import 以 0600 发布。读写服务使用不同 UID 时，部署层准备共享 GID、目录可访问性及补充组；仅发布者可写 shared，读者只读。导入时显式传共享 GID（非负十进制数，最大 2147483647）：
+
+```bash
+license-sdk import --config license-product.json --root ./license-data --service gateway --file customer.license.json --shared-group 21000
+java -jar license-core-0.7.1.jar import --config license-product.json --root ./license-data --service gateway --file customer.license.json --shared-group 21000
+```
+
+API 对应 Python `runtime.import_license(raw, expected, shared_group=21000)`，Java `runtime.importLicense(raw, expected, "21000")`。GID 是部署选择，不加入 Issuer 公开配置或签名内容。
+
+SDK 在原导入锁内完成临时文件写入、设置并核验目标组／0640、同步和原子替换。组或权限设置失败不替换旧文件；替换后持久性未确认返回 OUTCOME_UNKNOWN。同字节重试也确认权限，需要时在锁内原子重发相同字节，成功返回 ALREADY_APPLIED；许可到期仍返回真实 EXPIRED。所有写入口使用同一共享参数，不能在调用返回后再 chmod，也不能用默认私有模式覆盖共享许可。身份、主密钥、clock 和恢复文件不受该参数影响。
+
+### 备份／升级前只读核验安装资料
+
+先停止写入或取得一致快照，再执行：
+
+```bash
+license-sdk check --config license-product.json --root ./license-data
+java -jar license-core-0.7.1.jar check --config license-product.json --root ./license-data
+```
+
+成功返回 `installationId`。API 对应 Python `validate_installation(product_config, root)`（来自 `license_sdk.installation`），Java `LicenseInstallation.validate(productConfig, root)`；Java 也接受配置字节。
+
+check 核验完成身份、32 字节主密钥和全部已配置服务的 clock／HMAC，不需要选择服务、读取 machine-id 或判断当前商业许可。缺少或到期的商业许可不妨碍完整安装备份；坏 clock 仍拒绝。它不创建 Runtime、锁或目录，不初始化、修复、checkpoint 或恢复，可对只读挂载使用。它也不为活动目录创建一致快照；归档白名单、UID/GID、同宿主恢复和停止写入由产品负责。
 
 备份和恢复保留身份、主密钥、商业文件及对应时间记录；已完成安装不能重新生成 UUID／key／clock。当前 init 不为已安装产品增补新服务，须另行受控迁移。
 

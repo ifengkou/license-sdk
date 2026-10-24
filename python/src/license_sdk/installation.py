@@ -134,6 +134,49 @@ def _identity(path: Path, product: ProductConfig) -> tuple[dict[str, object], by
     return data, master
 
 
+def validate_installation(product: ProductConfig, root: Path) -> str:
+    """Validate a stopped installation or consistent snapshot without writing any files."""
+    try:
+        root = absolute_path(root)
+        folders = (
+            root,
+            root / "identity",
+            root / "shared",
+            root / "state",
+            *(root / "state" / service for service, _ in product.profile.recovery_prefixes),
+        )
+        for folder in folders:
+            _safe_path(folder)
+            if not stat.S_ISDIR(folder.lstat().st_mode):
+                raise ValueError("installation directory required")
+        if any(
+            entry.name == ".identity-stage" or entry.name.startswith(".identity-stage-")
+            for entry in root.iterdir()
+        ):
+            raise ValueError("unfinished identity stage; preserve installation and investigate")
+        identity = root / "identity"
+        if {entry.name for entry in identity.iterdir()} != {"installation.json", "service.key"}:
+            raise ValueError("invalid identity directory entries")
+        data, master = _identity(identity, product)
+        if data["initialized"] is not True:
+            raise ValueError("installation is incomplete; do not repair it during validation")
+        installation_id = str(data["installation_id"])
+        for service, _ in product.profile.recovery_prefixes:
+            decode_clock(
+                read_bounded(root / "state" / service / "clock.json", 8192),
+                product_id=product.profile.product_id,
+                installation_id=installation_id,
+                service=service,
+                service_key=master,
+            )
+        return installation_id
+    except (OSError, ValueError) as exc:
+        raise OnboardingError(
+            "LICENSE_INSTALLATION_INVALID",
+            "installation validation failed; preserve files and investigate",
+        ) from exc
+
+
 def _initialize_installation(product: ProductConfig, root: Path) -> InstallationResult:
     """Initialize all services once; resume a valid draft without replacing its identity."""
     root = absolute_path(root)

@@ -119,6 +119,72 @@ class OnboardingTest {
         assertArrayEquals(original.get(root.resolve("identity/service.key")), key());
     }
 
+    @Test void readonlyValidationNeedsNoRuntimeLicenseMachineOrLock() throws Exception {
+        assertEquals(OnboardingException.Code.INSTALLATION_INVALID,
+            assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)).code());
+        assertFalse(Files.exists(root));
+        LicenseInstallation.initialize(config, root); UUID expected = id();
+        Files.delete(root.resolve(".init.lock")); Files.delete(machine);
+        ClockState original = clockState();
+        Files.write(clock(), ClockStateCodec.encode(new ClockState(original.productId(), original.installationId(), original.service(),
+            original.epoch(), original.sequence(), Instant.parse("2100-01-01T00:00:00Z"), original.lastRecoveryId()), key()));
+        Files.write(root.resolve("shared/active.license.json"), license(false, Instant.now().minusSeconds(20), Instant.now().minusSeconds(1)));
+        Map<Path, byte[]> before = tree(root);
+        var readonly = new OnboardingFiles() {
+            @Override void directory(Path path) { fail("check must not create directories"); }
+            @Override <T> T withLock(Path path, Action<T> action) { throw new AssertionError("check must not lock"); }
+            @Override void sync(Path path) { fail("check must not sync"); }
+            @Override void writeNew(Path path, byte[] bytes) { fail("check must not write"); }
+            @Override void writeExisting(Path path, byte[] bytes) { fail("check must not write"); }
+            @Override void move(Path from, Path to, boolean replace) { fail("check must not rename"); }
+        };
+        assertEquals(expected, LicenseInstallation.validate(ProductConfig.parse(config), root, readonly));
+        assertTree(before, root); assertFalse(Files.exists(root.resolve(".init.lock")));
+        Files.delete(root.resolve("shared/active.license.json"));
+        assertEquals(expected, LicenseInstallation.validate(config, root));
+        List<Path> paths;
+        try (var entries = Files.walk(root)) { paths = entries.toList(); }
+        for (Path path : paths) Files.setPosixFilePermissions(path,
+            PosixFilePermissions.fromString(Files.isDirectory(path) ? "r-x------" : "r--------"));
+        try { assertEquals(expected, LicenseInstallation.validate(config, root)); }
+        finally {
+            for (Path path : paths) Files.setPosixFilePermissions(path,
+                PosixFilePermissions.fromString(Files.isDirectory(path) ? "rwx------" : "rw-------"));
+        }
+    }
+
+    @Test void readonlyValidationRefusesIncompleteCorruptOrAmbiguousInstallations() throws Exception {
+        LicenseInstallation.initialize(config, root);
+        Path identity = root.resolve("identity/installation.json"), master = root.resolve("identity/service.key");
+        byte[] identityBytes = Files.readAllBytes(identity), masterBytes = key(), clockBytes = Files.readAllBytes(clock());
+        for (String damaged : List.of(new String(identityBytes, StandardCharsets.US_ASCII).replace("true", "false"),
+            new String(identityBytes, StandardCharsets.US_ASCII).replace("other-product", "foreign-product"),
+            new String(identityBytes, StandardCharsets.US_ASCII).replace(id().toString(), "invalid-uuid"))) {
+            Files.writeString(identity, damaged);
+            assertEquals(OnboardingException.Code.INSTALLATION_INVALID,
+                assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)).code());
+            assertEquals(damaged, Files.readString(identity)); Files.write(identity, identityBytes);
+        }
+        Files.write(master, new byte[31]); assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)); Files.write(master, masterBytes);
+        Files.writeString(clock(), "{}"); assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root));
+        var envelope = (com.fasterxml.jackson.databind.node.ObjectNode) JSON.readTree(clockBytes);
+        envelope.put("mac", Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]));
+        Files.write(clock(), JSON.writeValueAsBytes(envelope));
+        assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)); Files.write(clock(), clockBytes);
+        Files.delete(clock()); assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)); assertFalse(Files.exists(clock()));
+        Files.createSymbolicLink(clock(), root.resolve("state/worker/clock.json"));
+        assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)); Files.delete(clock()); Files.write(clock(), clockBytes);
+        Path extra = root.resolve("identity/extra"); Files.writeString(extra, "keep");
+        assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)); Files.delete(extra);
+        for (String stage : List.of(".identity-stage", ".identity-stage-legacy")) {
+            Path staged = Files.createDirectory(root.resolve(stage));
+            assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(config, root)); Files.delete(staged);
+        }
+        var changed = configData(); changed.put("services", List.of(Map.of("id", "third", "recovery_prefix", "OP1T")));
+        assertThrows(OnboardingException.class, () -> LicenseInstallation.validate(JSON.writeValueAsBytes(changed), root));
+        assertEquals(id(), LicenseInstallation.validate(config, root));
+    }
+
     @Test void draftResumesWithoutChangingIdentityKeyOrExistingSeeds() throws Exception {
         LicenseInstallation.initialize(config, root);
         UUID originalId = id(); byte[] originalKey = key(); byte[] originalClock = Files.readAllBytes(clock());
@@ -249,6 +315,79 @@ class OnboardingTest {
         assertThrows(LicenseException.class, () -> runtime.importLicense(candidate, result.fileDigest()));
     }
 
+    @Test void sharedImportHasConfirmedAttributesBeforeAtomicVisibilityAndRepairsSameBytes() throws Exception {
+        LicenseInstallation.initialize(config, root); var runtime = runtime();
+        Path target = root.resolve("shared/active.license.json");
+        String group = Files.getAttribute(root, "unix:gid").toString();
+        byte[] candidate = license(false, Instant.now().minusSeconds(10), null);
+        var publication = new OnboardingFiles() {
+            @Override void move(Path source, Path destination, boolean replace) throws IOException {
+                assertTrue(attributesMatch(source, Integer.valueOf(group)));
+                assertArrayEquals(candidate, Files.readAllBytes(source));
+                super.move(source, destination, replace);
+            }
+        };
+        assertEquals(LicenseRuntime.ImportActionStatus.APPLIED, runtime.importLicense(candidate, null, group, publication).actionStatus());
+        assertTrue(new OnboardingFiles().attributesMatch(target, Integer.valueOf(group)));
+        Object originalInode = Files.getAttribute(target, "unix:ino");
+        assertEquals(LicenseRuntime.ImportActionStatus.ALREADY_APPLIED, runtime.importLicense(candidate, runtime.licenseFileDigest(), group).actionStatus());
+        assertEquals(originalInode, Files.getAttribute(target, "unix:ino"));
+        Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"));
+        assertEquals(LicenseRuntime.ImportActionStatus.ALREADY_APPLIED,
+            runtime.importLicense(candidate, runtime.licenseFileDigest(), group, publication).actionStatus());
+        assertTrue(new OnboardingFiles().attributesMatch(target, Integer.valueOf(group)));
+        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(root.resolve("identity/service.key"))));
+        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(clock())));
+        byte[] expired = license(false, Instant.now().minusSeconds(20), Instant.now().minusSeconds(1));
+        Files.write(target, expired); Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"));
+        var result = runtime.importLicense(expired, runtime.licenseFileDigest(), group);
+        assertEquals(LicenseRuntime.ImportActionStatus.ALREADY_APPLIED, result.actionStatus());
+        assertEquals(LicenseRuntime.State.EXPIRED, result.status().state());
+        assertTrue(new OnboardingFiles().attributesMatch(target, Integer.valueOf(group)));
+    }
+
+    @Test void sharedAttributeAndSyncFailuresRespectPublicationBoundary() throws Exception {
+        LicenseInstallation.initialize(config, root); var runtime = runtime();
+        byte[] old = license(false, Instant.now().minusSeconds(10), null), candidate = license(false, Instant.now().minusSeconds(10), null);
+        var original = runtime.importLicense(old, null); String group = Files.getAttribute(root, "unix:gid").toString();
+        for (String point : List.of("attributes", "sync", "rename")) {
+            var failure = new OnboardingFiles() {
+                @Override void attributes(Path path, int gid) throws IOException {
+                    super.attributes(path, gid); if (point.equals("attributes")) throw new IOException("attributes");
+                }
+                @Override void sync(Path path) throws IOException { if (point.equals("sync")) throw new IOException("file sync"); super.sync(path); }
+                @Override void move(Path from, Path to, boolean replace) throws IOException { throw new IOException("rename"); }
+            };
+            assertEquals(OnboardingException.Code.STORAGE_FAILED,
+                assertThrows(OnboardingException.class, () -> runtime.importLicense(candidate, original.fileDigest(), group, failure)).code());
+            assertEquals(original.fileDigest(), runtime.licenseFileDigest());
+            assertTrue(new OnboardingFiles().attributesMatch(root.resolve("shared/active.license.json"), null));
+        }
+        var failure = new OnboardingFiles() {
+            @Override void sync(Path path) throws IOException {
+                if (Files.isDirectory(path)) throw new IOException("directory sync"); super.sync(path);
+            }
+        };
+        var unknown = runtime.importLicense(candidate, original.fileDigest(), group, failure);
+        assertEquals(LicenseRuntime.ImportActionStatus.OUTCOME_UNKNOWN, unknown.actionStatus());
+        assertTrue(new OnboardingFiles().attributesMatch(root.resolve("shared/active.license.json"), Integer.valueOf(group)));
+        for (boolean unsupported : List.of(false, true)) {
+            var unreadableAttributes = new OnboardingFiles() {
+                @Override boolean attributesMatch(Path path, Integer gid) throws IOException {
+                    if (unsupported) throw new UnsupportedOperationException("attribute unavailable");
+                    throw new IOException("attribute read failed");
+                }
+            };
+            assertEquals(LicenseRuntime.ImportActionStatus.OUTCOME_UNKNOWN,
+                runtime.importLicense(candidate, unknown.fileDigest(), group, unreadableAttributes).actionStatus());
+            assertEquals(unknown.fileDigest(), runtime.licenseFileDigest());
+        }
+        assertEquals(LicenseRuntime.ImportActionStatus.ALREADY_APPLIED, runtime.importLicense(candidate, unknown.fileDigest(), group).actionStatus());
+        for (String invalid : List.of("", "-1", "+1", "staff", "2147483648", "99999999999999999999999")) {
+            assertThrows(IllegalArgumentException.class, () -> runtime.importLicense(candidate, runtime.licenseFileDigest(), invalid));
+        }
+    }
+
     @Test void damagedOldFileDigestIsCompleteAndBoundedInMemory() throws Exception {
         LicenseInstallation.initialize(config, root); var runtime = runtime();
         byte[] damaged = new byte[100000]; Arrays.fill(damaged, (byte)'x');
@@ -264,6 +403,7 @@ class OnboardingTest {
         LicenseInstallation.initialize(config, root); var runtime = runtime();
         byte[] expired = license(false, Instant.now().minusSeconds(20), Instant.now().minusSeconds(1));
         Path target = root.resolve("shared/active.license.json"); Files.write(target, expired);
+        Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"));
         var modified = Files.getLastModifiedTime(target);
         var result = runtime.importLicense(expired, runtime.licenseFileDigest());
         assertEquals(LicenseRuntime.ImportActionStatus.ALREADY_APPLIED, result.actionStatus()); assertEquals(LicenseRuntime.State.EXPIRED, result.status().state());
@@ -384,6 +524,19 @@ class OnboardingTest {
             assertEquals(1, LicenseCli.run(new String[]{"request", "--config", configuration.toString(), "--root", root.toString(), "--service", "backend", "--machine-id", machine.toString(), "--output", request.toString()}, output, error));
             assertTrue(err.toString(StandardCharsets.UTF_8).contains("LICENSE_STATE_CONFLICT"));
             assertEquals(1, LicenseCli.run(new String[]{"status", "--config", configuration.toString(), "--root", root.toString()}, output, error));
+            Files.delete(root.resolve(".init.lock")); Files.delete(machine); out.reset();
+            assertEquals(0, LicenseCli.run(new String[]{"check", "--config", configuration.toString(), "--root", root.toString()}, output, error));
+            assertEquals(id().toString(), JSON.readTree(out.toByteArray()).get("installationId").asText());
+            assertFalse(Files.exists(root.resolve(".init.lock")));
+            assertEquals(1, LicenseCli.run(new String[]{"check", "--config", configuration.toString(), "--root", root.toString(), "--service", "backend"}, output, error));
+            Path candidate = temporary.resolve("customer.license.json"); Files.write(candidate, license(false, Instant.now().minusSeconds(10), null));
+            String group = Files.getAttribute(root, "unix:gid").toString(); out.reset();
+            assertEquals(0, LicenseCli.run(new String[]{"import", "--config", configuration.toString(), "--root", root.toString(), "--service", "backend", "--file", candidate.toString(), "--shared-group", group}, output, error));
+            assertEquals("APPLIED", JSON.readTree(out.toByteArray()).get("actionStatus").asText());
+            assertTrue(new OnboardingFiles().attributesMatch(root.resolve("shared/active.license.json"), Integer.valueOf(group)));
+            Files.writeString(clock(), "damaged"); err.reset();
+            assertEquals(1, LicenseCli.run(new String[]{"check", "--config", configuration.toString(), "--root", root.toString()}, output, error));
+            assertTrue(err.toString(StandardCharsets.UTF_8).contains("INSTALLATION_INVALID"));
         }
     }
     private static Map<Path, byte[]> tree(Path root) throws IOException {

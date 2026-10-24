@@ -24,6 +24,29 @@ public final class LicenseInstallation {
     public static Result initialize(ProductConfig config, Path root) throws IOException {
         return initialize(config, root, new OnboardingFiles());
     }
+    /** Validate a stopped installation or consistent snapshot without creating locks or changing files. */
+    public static UUID validate(byte[] config, Path root) throws IOException {
+        return validate(ProductConfig.parse(config), root);
+    }
+    public static UUID validate(ProductConfig config, Path root) throws IOException {
+        return validate(config, root, new OnboardingFiles());
+    }
+    static UUID validate(ProductConfig config, Path root, OnboardingFiles files) throws IOException {
+        try {
+            Path safe = OnboardingFiles.checked(root);
+            requireDirectory(safe);
+            try (var children = Files.list(safe)) {
+                if (children.anyMatch(path -> path.getFileName().toString().equals(".identity-stage")
+                    || path.getFileName().toString().startsWith(".identity-stage-"))) throw invalid();
+            }
+            Identity identity = readIdentity(safe.resolve("identity"), config, files);
+            if (!identity.initialized()) throw invalid();
+            validateClocks(config, safe, identity, files);
+            return identity.id();
+        } catch (IOException | IllegalArgumentException | UnsupportedOperationException error) {
+            throw invalid();
+        }
+    }
     static Result initialize(ProductConfig config, Path root, OnboardingFiles files) throws IOException {
         Path safe = OnboardingFiles.checked(root);
         files.directory(safe);
@@ -63,13 +86,9 @@ public final class LicenseInstallation {
         Path shared = root.resolve("shared");
         Path state = root.resolve("state");
         if (current.initialized()) {
-            requireDirectory(shared); requireDirectory(state);
+            validateClocks(config, root, current, files);
             for (String service : config.services().keySet()) {
-                Path serviceRoot = state.resolve(service); requireDirectory(serviceRoot);
-                byte[] raw;
-                try { raw = files.read(serviceRoot.resolve("clock.json"), 8192); }
-                catch (java.nio.file.NoSuchFileException missing) { throw invalid(); }
-                ClockStateCodec.decode(raw, current.key(), config.productId(), current.id(), service);
+                Path serviceRoot = state.resolve(service);
                 files.sync(serviceRoot.resolve("clock.json")); files.sync(serviceRoot);
             }
             // A prior initialized=true rename may have succeeded before directory sync failed.
@@ -96,6 +115,16 @@ public final class LicenseInstallation {
         var outcome = files.publish(identity.resolve("installation.json"), identityBytes(config.productId(), current.id(), true));
         if (outcome != StateStore.CommitOutcome.COMMITTED) throw new OnboardingException(OnboardingException.Code.OUTCOME_UNKNOWN);
         return new Result("INITIALIZED", current.id());
+    }
+    private static void validateClocks(ProductConfig config, Path root, Identity identity, OnboardingFiles files) throws IOException {
+        requireDirectory(root.resolve("shared")); requireDirectory(root.resolve("state"));
+        for (String service : config.services().keySet()) {
+            Path serviceRoot = root.resolve("state").resolve(service); requireDirectory(serviceRoot);
+            byte[] raw;
+            try { raw = files.read(serviceRoot.resolve("clock.json"), 8192); }
+            catch (java.nio.file.NoSuchFileException missing) { throw invalid(); }
+            ClockStateCodec.decode(raw, identity.key(), config.productId(), identity.id(), service);
+        }
     }
     private static Identity readIdentity(Path directory, ProductConfig config, OnboardingFiles files) throws IOException {
         requireDirectory(directory);

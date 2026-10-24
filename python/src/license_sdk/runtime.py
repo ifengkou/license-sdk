@@ -432,10 +432,16 @@ class LicenseRuntime:
 
         return current_file_digest(self.paths.root / "shared/active.license.json")
 
-    def import_license(self, raw: bytes, expected_file_digest: str | None) -> "ImportResult":
+    def import_license(
+        self,
+        raw: bytes,
+        expected_file_digest: str | None,
+        *,
+        shared_group: int | None = None,
+    ) -> "ImportResult":
         from license_sdk.commercial import import_license
 
-        return import_license(self, raw, expected_file_digest)
+        return import_license(self, raw, expected_file_digest, shared_group=shared_group)
 
     def start(self) -> "LicenseRuntime":
         with self._lifecycle_lock:

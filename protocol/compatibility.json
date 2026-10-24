@@ -1,6 +1,6 @@
 {
-  "sdk_version": "0.7.0",
-  "status": "simple-product-onboarding",
+  "sdk_version": "0.7.1",
+  "status": "shared-publication-and-readonly-installation",
   "implemented_protocols": [
     "IC1",
     "RC1J",
@@ -19,7 +19,7 @@
     "file": "request-code-v1-vectors.json",
     "sha256": "c68ce867b6420c5066cd0f966550bd6be4b712e2b636e002f14866644f6a32dc"
   },
-  "artifact_coordinates_provisional": true,
+  "artifact_coordinates_provisional": false,
   "signing_vectors": "test-fixtures/commercial-v1-test-vectors.json (test-only, excluded from runtime)",
   "test_only_signature_vectors": {
     "file": "test-fixtures/commercial-v1-test-vectors.json",

@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import os
+import stat
 
 import pytest
 from test_import import signed
@@ -64,7 +66,7 @@ def test_cli_complete_path(product, tmp_path, capsys):
     assert "Traceback" not in captured.err
 
 
-@pytest.mark.parametrize("command", ["init", "status", "request", "import"])
+@pytest.mark.parametrize("command", ["init", "check", "status", "request", "import"])
 def test_help(command, capsys):
     with pytest.raises(SystemExit) as exc:
         main([command, "--help"])
@@ -89,3 +91,53 @@ def test_status_reports_full_digest_of_oversized_invalid_file(product, tmp_path,
     result = json.loads(capsys.readouterr().out)
     assert result["state"] == "INVALID"
     assert result["fileDigest"] == hashlib.sha256(raw).hexdigest()
+
+
+def test_check_without_service_machine_or_lock_is_readonly(product, tmp_path, capsys):
+    from license_sdk.installation import initialize_installation
+
+    config, _ = product
+    config_path = tmp_path / "product.json"
+    config_path.write_bytes(config.to_bytes())
+    root = tmp_path / "installation"
+    initialized = initialize_installation(config, root)
+    (root / ".init.lock").unlink()
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    args = ["check", "--config", str(config_path), "--root", str(root)]
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out) == {"installationId": initialized.installation_id}
+    assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    assert not (root / ".init.lock").exists()
+    (root / "state/worker/clock.json").write_bytes(b"corrupt")
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out)["code"] == "LICENSE_INSTALLATION_INVALID"
+
+
+def test_import_cli_shared_group(product, tmp_path, capsys):
+    from license_sdk.installation import initialize_installation
+
+    config, _ = product
+    config_path = tmp_path / "product.json"
+    config_path.write_bytes(config.to_bytes())
+    root = tmp_path / "installation"
+    initialize_installation(config, root)
+    candidate = tmp_path / "candidate.json"
+    candidate.write_bytes(signed(product))
+    args = [
+        "import",
+        "--config",
+        str(config_path),
+        "--root",
+        str(root),
+        "--service",
+        "backend",
+        "--file",
+        str(candidate),
+        "--shared-group",
+        str(os.getgid()),
+    ]
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["actionStatus"] == "APPLIED"
+    path = root / "shared/active.license.json"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert path.stat().st_gid == os.getgid()

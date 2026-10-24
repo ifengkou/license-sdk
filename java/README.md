@@ -1,20 +1,18 @@
-# Java license SDK 0.7.0
+# Java license SDK 0.7.1
 
-Download the core JAR from [GitHub Releases](https://github.com/ifengkou/license-sdk/releases). See [release and offline installation](../docs/releasing.md) for checksums, local JAR dependencies, and the tag-based CI release procedure. The core requires JDK 21 only.
+Download the core JAR or versioned Maven repository archive from [GitHub Releases](https://github.com/ifengkou/license-sdk/releases). See [release and offline installation](../docs/releasing.md) for checksums, Maven coordinates, local JAR usage, and the tag-based CI release procedure. The core requires JDK 21 only.
 
 [中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
 
-Java 21 standalone Gradle project. Provisional local coordinates are
-`io.metor.license:license-core:0.7.0` and `io.metor.license:license-spring:0.7.0`.
-Version 0.7.0 adds standalone onboarding; no remote publication is performed. Existing 0.6.0 artifacts and constructors remain available unchanged.
-Existing 0.4.0 and Phase 5.5 validation artifacts remain unchanged. These names are
-not a confirmed organization namespace or a remote publication.
+Java 21 standalone Gradle project. Maven coordinates are
+`io.metor.license:license-core:0.7.1` and `io.metor.license:license-spring:0.7.1`.
+Version 0.7.1 adds atomic group-readable commercial publication and read-only installation validation to the existing onboarding APIs. GitHub Releases supplies standalone JARs and a versioned Maven repository archive; it does not publish to Maven Central. Existing artifacts and constructors remain unchanged.
 The Gradle 8.14 wrapper is copied unchanged from the existing Metor wrapper.
 
 
 ## Five-step quick start (JDK 21 only)
 
-Use the prebuilt `license-core-0.7.0.jar`. The standalone core has no Spring or
+Use the prebuilt `license-core-0.7.1.jar`. The standalone core has no Spring or
 Python dependency. Run the following commands in a private working directory as
 your normal user; no sudo or handwritten installation files are needed.
 
@@ -25,8 +23,8 @@ your normal user; no sudo or handwritten installation files are needed.
 2. Initialize customer data once:
 
    ```sh
-   java -jar license-core-0.7.0.jar init --config license-product.json --root ./license-data
-   java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service YOUR_SERVICE
+   java -jar license-core-0.7.1.jar init --config license-product.json --root ./license-data
+   java -jar license-core-0.7.1.jar status --config license-product.json --root ./license-data --service YOUR_SERVICE
    ```
 
    `init` creates the UUID, 32-byte installation key, and all configured services'
@@ -51,9 +49,9 @@ your normal user; no sudo or handwritten installation files are needed.
 4. Export the request, sign it in Issuer's commercial page, then import the original download:
 
    ```sh
-   java -jar license-core-0.7.0.jar request --config license-product.json --root ./license-data --service YOUR_SERVICE --output request.json
-   java -jar license-core-0.7.0.jar import --config license-product.json --root ./license-data --service YOUR_SERVICE --file customer.license.json
-   java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service YOUR_SERVICE
+   java -jar license-core-0.7.1.jar request --config license-product.json --root ./license-data --service YOUR_SERVICE --output request.json
+   java -jar license-core-0.7.1.jar import --config license-product.json --root ./license-data --service YOUR_SERVICE --file customer.license.json
+   java -jar license-core-0.7.1.jar status --config license-product.json --root ./license-data --service YOUR_SERVICE
    ```
 
    Expect `APPLIED` and `ACTIVE`. These commands use the actual Linux
@@ -72,13 +70,11 @@ To run the example independently, copy only the JAR, downloaded public configura
 and `LicenseQuickStart.java` to a temporary working directory:
 
 ```sh
-javac -cp license-core-0.7.0.jar LicenseQuickStart.java
-java -cp license-core-0.7.0.jar:. LicenseQuickStart ./license-data YOUR_SERVICE
+javac -cp license-core-0.7.1.jar LicenseQuickStart.java
+java -cp license-core-0.7.1.jar:. LicenseQuickStart ./license-data YOUR_SERVICE
 ```
 
-Initialization uses private current-user directories/files (0700/0600). Shared
-multi-account container permissions remain the product installer's responsibility;
-existing ICP deployments keep their installer, mount and group setup.
+Initialization uses private current-user directories/files (0700/0600). Multi-account container directory ownership, identity access and mount setup remain the product installer's responsibility. For the commercial file only, use the shared import parameter below; do not chmod the published file afterward.
 
 ## Management integration and persistence
 
@@ -90,6 +86,45 @@ publishes original bytes. `ImportResult` contains `actionStatus()`, `fileDigest(
 and the actual `status()`. `ALREADY_APPLIED` confirms existing bytes without
 requiring their commercial window to remain ACTIVE; it still verifies signature,
 product and binding. A new candidate must be ACTIVE.
+
+For a commercial file read by another account in a shared POSIX group, pass a
+numeric GID string (0 through 2147483647), for example:
+
+```java
+runtime.importLicense(candidateBytes, expectedRawDigest, "21000");
+```
+
+```sh
+java -jar license-core-0.7.1.jar import --config license-product.json --root ./license-data --service YOUR_SERVICE --file customer.license.json --shared-group 21000
+```
+
+The SDK sets and confirms that group and mode 0640 on its temporary file before
+fsync and atomic replacement, under the existing CAS lock. The caller must be
+allowed to assign the group; unsupported group attributes or a permission failure
+refuse publication without replacing the old file. Omitting the group keeps mode
+0600. Shared settings apply only to the commercial file, never installation keys,
+clock state or recovery files. They are deployment inputs, not signed fields or
+additions to `license-product.json`. Both accounts still need directory access.
+Same-byte imports confirm mode/group as well as durability; when attributes need
+repair, the SDK republishes the same bytes atomically and returns ALREADY_APPLIED
+on confirmation. This also works for a verified expired same-byte license without
+making its commercial state ACTIVE.
+
+`LicenseInstallation.validate(publicConfig, root)` returns the installation UUID
+without creating a Runtime or any files. The byte-array and ProductConfig overloads
+check the completed identity, 32-byte master key and every configured service's
+clock structure/HMAC. The CLI equivalent needs no service or machine ID:
+
+```sh
+java -jar license-core-0.7.1.jar check --config license-product.json --root ./license-data
+```
+
+It prints `{"installationId":"..."}` on success. Missing, damaged, unfinished or
+ambiguous installation material returns INSTALLATION_INVALID; no initialization,
+lock creation, repair, fsync or checkpoint occurs. Commercial expiry/missing files
+and the current wall clock do not affect this integrity check. Stop writers or
+validate a consistent snapshot before backup: check does not make a live directory
+snapshot. Filesystem reads may update access times on a writable mount.
 
 For HTTP, obtain the expected digest from the client's status observation; a stale
 value is `LICENSE_STATE_CONFLICT`, not permission to overwrite. Only an authorized
@@ -193,19 +228,19 @@ included in runtime JARs. Production hosts retain their own admin authentication
 ```
 
 The `examples/StandaloneCodec.java` smoke uses only the built core JAR and JDK 21.
-Copy that source and `license-core/build/libs/license-core-0.7.0.jar` into an empty
+Copy that source and `license-core/build/libs/license-core-0.7.1.jar` into an empty
 directory, then run:
 
 ```sh
-javac -cp license-core-0.7.0.jar StandaloneCodec.java
-java -cp license-core-0.7.0.jar:. StandaloneCodec
+javac -cp license-core-0.7.1.jar StandaloneCodec.java
+java -cp license-core-0.7.1.jar:. StandaloneCodec
 ```
 
 For local publication verification, run
 `./gradlew publishAllPublicationsToVerificationRepository`. This writes both
 versioned Maven publications to `build/maven-repository`, never a remote registry.
-A detached consumer may resolve `io.metor.license:license-spring:0.7.0` from a copy
-of that directory; its POM pins `license-core:0.7.0` transitively. The copied
+A detached consumer may resolve `io.metor.license:license-spring:0.7.1` from a copy
+of that directory; its POM pins `license-core:0.7.1` transitively. The copied
 repository is sufficient without any SDK source or business checkout.
 
 No build uses sibling business source or `.agents` files. Gradle needs its pinned
