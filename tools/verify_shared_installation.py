@@ -127,6 +127,20 @@ def run(
     return result
 
 
+def sdk_result(result: subprocess.CompletedProcess) -> dict:
+    # JVM startup diagnostics can precede the SDK's single JSON line on either stream.
+    values = []
+    for line in (result.stdout + "\n" + result.stderr).splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            values.append(value)
+    assert len(values) == 1, ("Expected one SDK JSON result", result.stdout, result.stderr)
+    return values[0]
+
+
 def operation(language: str, jar: Path, action: str, config: Path, root: Path) -> list[str]:
     base = (
         [sys.executable, "-m", "license_sdk.cli"]
@@ -162,7 +176,7 @@ def check_readonly(work: Path, jar: Path) -> None:
     ids = []
     for language in ("python", "java"):
         result = run(operation(language, jar, "check", config, root))
-        value = json.loads(result.stdout)
+        value = sdk_result(result)
         ids.append(value["installationId"])
         assert snapshot(root) == before
     assert len(set(ids)) == 1
@@ -299,14 +313,12 @@ def exercise(work: Path, jar: Path) -> None:
                 assert holder.stdout.readline().strip() == "READY", "lock holder failed to start"
                 previous = target.read_bytes()
                 result = publish(contender, candidates[1], expected=1)
-                assert (
-                    json.loads(result.stdout or result.stderr)["code"] == "LICENSE_STATE_CONFLICT"
-                )
+                assert sdk_result(result)["code"] == "LICENSE_STATE_CONFLICT"
                 assert target.read_bytes() == previous
             finally:
                 output, errors = holder.communicate(input="x", timeout=10)
             assert holder.returncode == 0, (output, errors)
-            released = json.loads(publish(contender, candidates[1]).stdout)
+            released = sdk_result(publish(contender, candidates[1]))
             assert released["actionStatus"] in ("APPLIED", "ALREADY_APPLIED")
         for index, language in enumerate(("java", "python", "java", "python"), 1):
             publish(language, candidates[index])
@@ -334,7 +346,7 @@ def exercise(work: Path, jar: Path) -> None:
         for language in ("python", "java"):
             previous = (target.read_bytes(), target.stat().st_mode, target.stat().st_gid)
             result = publish(language, candidates[9], "21099", expected=1)
-            failure = json.loads(result.stdout or result.stderr)
+            failure = sdk_result(result)
             assert failure["code"] in ("LICENSE_STORAGE_FAILED", "STORAGE_FAILED")
             assert (target.read_bytes(), target.stat().st_mode, target.stat().st_gid) == previous
     finally:
