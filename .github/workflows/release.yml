@@ -159,6 +159,7 @@ jobs:
       - name: Verify different UIDs, interruption and a read-only bind mount
         shell: bash
         run: |
+          trap 'echo "::error title=POSIX verification command failed::$BASH_COMMAND"' ERR
           sdk_version=$(python tools/release.py check-version)
           sdk_jar=$(find "$GITHUB_WORKSPACE/posix-inputs/java" -name "license-core-$sdk_version.jar")
           sudo env JAVA_HOME="$JAVA_HOME" GITHUB_ACTIONS=true "$POSIX_VERIFY_ROOT/venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$POSIX_VERIFY_ROOT/installation"

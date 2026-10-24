@@ -389,7 +389,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (AssertionError, OSError, subprocess.SubprocessError) as error:
+    except Exception as error:
         if os.environ.get("GITHUB_ACTIONS") == "true":
             message = (
                 str(error)[:8000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
