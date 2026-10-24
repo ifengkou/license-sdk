@@ -216,6 +216,11 @@ def exercise(work: Path, jar: Path) -> None:
     assert not work.exists() or not any(work.iterdir()), "work directory must be empty"
     work.mkdir(parents=True, exist_ok=True)
     work.chmod(0o755)
+    # The calling user's artifact directory may be private to that user (for example CI).
+    local_jar = work / "license-core.jar"
+    shutil.copyfile(jar, local_jar)
+    local_jar.chmod(0o644)
+    jar = local_jar
     key = Ed25519PrivateKey.generate()
     config = ProductConfig(
         ProductProfile(
