@@ -159,12 +159,12 @@ jobs:
         run: |
           sdk_version=$(python tools/release.py check-version)
           sdk_jar=$(find "$GITHUB_WORKSPACE/posix-inputs/java" -name "license-core-$sdk_version.jar")
-          sudo --preserve-env=JAVA_HOME "$RUNNER_TEMP/posix-venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$RUNNER_TEMP/shared-installation"
+          sudo env JAVA_HOME="$JAVA_HOME" "$RUNNER_TEMP/posix-venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$RUNNER_TEMP/shared-installation"
           mkdir -p "$RUNNER_TEMP/shared-installation-ro"
           sudo mount --bind "$RUNNER_TEMP/shared-installation" "$RUNNER_TEMP/shared-installation-ro"
           trap 'sudo umount "$RUNNER_TEMP/shared-installation-ro"' EXIT
           sudo mount -o remount,bind,ro "$RUNNER_TEMP/shared-installation-ro"
-          sudo --preserve-env=JAVA_HOME "$RUNNER_TEMP/posix-venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$RUNNER_TEMP/shared-installation-ro" --check-only
+          sudo env JAVA_HOME="$JAVA_HOME" "$RUNNER_TEMP/posix-venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$RUNNER_TEMP/shared-installation-ro" --check-only
 
   release:
     name: Publish GitHub Release
