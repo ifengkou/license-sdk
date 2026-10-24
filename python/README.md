@@ -1,16 +1,97 @@
 # Python license SDK
 
+Download wheels or a complete platform bundle from [GitHub Releases](https://github.com/ifengkou/license-sdk/releases). See [release and offline installation](../docs/releasing.md) for CPython 3.12 platform selection, virtual environments, hash verification, and the CI release procedure. Install dependencies at product build time; application startup does not require network access.
+
+## Five-step quick start (0.7.0)
+
+Linux/macOS, local filesystem, one process/Runtime per service. Install the prebuilt
+`metor-license-core==0.7.0` distribution (and `metor-license-fastapi==0.7.0` only
+when using its FastAPI dependency). Offline installations also need the target
+platform dependency wheels. Do this at build/install time, never application startup.
+
+1. Download **license-product.json** from your unlocked Issuer's SDK configuration
+   page. Include it in your product's controlled package resources. It contains
+   public keys, but determines trust: never accept replacements through customer
+   HTTP uploads or customer runtime data.
+2. Run SDK initialization once, as the account that owns the installation directory:
+
+   ```bash
+   license-sdk init --config ./license-product.json --root ./license-data
+   license-sdk status --config ./license-product.json --root ./license-data --service backend
+   ```
+
+   Replace `backend` with the service displayed by your Issuer; omit it only for
+   single-service products. Expected: `INITIALIZED`, then `UNLICENSED`.
+   SDK creates identity, random master key and all service clocks. Repeated init
+   returns `ALREADY_INITIALIZED` without changing those bytes. Damaged installs
+   must be investigated or recovered, never deleted/reinitialized as a workaround.
+3. Create one Runtime from the resource, start it for the process lifecycle and
+   close it on shutdown. For a package named `your_product` with the JSON included:
+
+   ```python
+   from importlib.resources import files
+   from pathlib import Path
+   from license_sdk.runtime import LicenseRuntime
+
+   raw = files("your_product").joinpath("license-product.json").read_bytes()
+   runtime = LicenseRuntime.from_config(raw, root=Path("./license-data"), service="backend")
+   runtime.start()
+   try:
+       print(runtime.status(read_only=True).state)
+       # Run your application, injecting this same Runtime.
+   finally:
+       runtime.close()
+   ```
+
+   `start()` maintains checkpoint every 30 seconds even without requests. Do not
+   also run your own checkpoint loop. Old explicit constructors and manual
+   checkpoint scheduling remain supported.
+4. Export the actual installation's request, sign it in Issuer, then safely import:
+
+   ```bash
+   license-sdk request --config ./license-product.json --root ./license-data \
+     --service backend --output ./request.json
+   # Upload request.json to Issuer; download customer.license.json.
+   license-sdk import --config ./license-product.json --root ./license-data \
+     --service backend --file ./customer.license.json
+   ```
+
+   The default host identifier is Linux `/etc/machine-id`. When using a real host
+   mount or macOS test environment, add `--machine-id /absolute/real-machine-id`
+   to request/import and pass `machine_id_file=Path(...)` to the factory. No fake
+   machine identifier is generated; UNBOUND signing needs none.
+   Import returns `APPLIED` with the real current state, normally `ACTIVE`.
+   `OUTCOME_UNKNOWN` means preserve the files and retry the same signed bytes.
+5. After your normal authentication, before a protected operation has side effects,
+   call `runtime.require_valid()`. Map `LicenseDeniedError` into your application's
+   error response. Admin status, request/import and recovery must remain accessible
+   through their own authentication when business operations are restricted.
+
+[examples/quick_start.py](examples/quick_start.py) uses installed SDK APIs end to end;
+run `python examples/quick_start.py --help`. No installation file format knowledge
+or application-specific deployment project is needed.
+
+`runtime.commercial_request()` returns the exact issuer request object.
+`runtime.license_file_digest()` supplies the current full raw-file SHA-256 or `None`
+when absent. Pass that snapshot to `runtime.import_license(raw, expected_file_digest)`;
+a concurrent change returns `LICENSE_STATE_CONFLICT`. File read failure is never
+reported as absence. `ImportResult.status` can be `None` for an unconfirmed outcome.
+Same-file retries confirm durability without extending validity or claiming ACTIVE.
+HTTP adapters enforce their own admin authentication, upload size/CSRF/no-store and
+error mapping; the SDK handles verification and publication.
+
+
 [中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
 
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal
-SDK development only; published adapter metadata pins `metor-license-core==0.6.0`.
+SDK development only; published adapter metadata pins `metor-license-core==0.7.0`.
 
 Phase 1 implements product profiles, host/install binding digests, manual request/recovery
 code codecs, packaged public vectors, a local guard protocol and a thin FastAPI adapter.
 Phase 2 adds strict commercial payload validation, raw-byte Ed25519 verification and
 TERM/PERPETUAL × HOST_INSTALL/UNBOUND evaluation. Phase 3 adds strict installation/clock observation and durable monotonic clock protection.
-Phase 6 adds single-service recovery in the same runtime. It does not implement workflow admission. Version 0.6.0 is built locally for unified integration; existing 0.4.0 wheels remain unchanged. The adapter requires an injected guard; no permissive default
+Phase 6 adds single-service recovery in the same runtime. Version 0.7.0 adds the configuration, initialization, import and lifecycle entry points above; existing 0.6.0 artifacts remain unchanged. The adapter requires an injected guard; no permissive default
 runtime is provided. It must run after host authentication; hosts choose protected entry points.
 
 Run `uv sync --all-packages` once, then `uv lock --check`, `uv run --locked ruff check .`,
@@ -35,8 +116,8 @@ request handling. All protocol errors carry a `LicenseValidationError.reason` ca
 Phase 3 public runtime lives in `license_sdk.runtime`. Construct `LicenseRuntime` with an
 explicit `ProductProfile`, service, `RuntimePaths`, build mode and immutable trusted key
 mapping. `checkpoint()` explicitly persists time state; `require_valid()` only observes
-state and throws `LicenseDeniedError(state, reasons)` unless ACTIVE or DEVELOPMENT. The product lifecycle must invoke a checkpoint at
-least every 30 seconds, independently of status requests. Missing/corrupt identity or clock
+state and throws `LicenseDeniedError(state, reasons)` unless ACTIVE or DEVELOPMENT. Use `start()`/`close()` for lifecycle maintenance, or invoke a checkpoint every
+30 seconds yourself; choose one scheduler. Missing/corrupt identity or clock
 never initializes replacement state, and integrity or commit failures remain sticky until
 a signed recovery is durably applied by the same runtime. Development mode never touches local installation files.
 

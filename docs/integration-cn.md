@@ -1,279 +1,245 @@
-# SDK 0.6.0 接入与升级
+# SDK 0.7.0：五步接入与升级
 
-面向产品开发者。SDK 负责本地验签、机器绑定、时间保护和签名恢复；产品负责安装初始化、固定信任、公钥与清单打包、HTTP 鉴权及错误响应。Java 与 Python 各使用本服务的一个长生命周期 Runtime，不互相查询授权结果。
+只需要本语言 SDK、从 Issuer 下载的一份公开配置，以及客户授权目录。SDK 自动初始化安装资料、导出申请、安全导入许可和维护 checkpoint；无需手工制作安装 JSON、随机密钥、clock 或文件发布脚本。
 
-## 1. 引入固定制品
+每个服务只创建一个 Runtime。下面以另一个产品的 `gateway` 服务为例；请使用你下载配置中的真实服务 ID。单服务可省略选择，多服务必须明确指定。Python 和 Java 可以独立使用，Java 用户只需 JDK。
 
-Java 21 依赖：
+## 第一步：准备依赖，下载并固化配置
 
-```groovy
-repositories {
-    maven { url = uri('/absolute/vendor/license-maven') }
-}
-dependencies {
-    implementation 'io.metor.license:license-core:0.6.0'
-}
-```
+SDK 从 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 下载。Java 选择核心 JAR；Python 离线安装选择与系统、CPU 和 CPython 3.12 匹配的完整包。具体下载、摘要校验、虚拟环境安装和维护者发行流程见 [发行与离线安装](releasing.md)。
+开发者在对应产品的 Issuer 实例解锁，进入 **SDK 接入配置**，下载 `license-product.json`。它包含产品 ID、服务映射、三个算法域、申请前缀和 key_id → 公开 Ed25519 公钥，无需逐字段复制。
 
-`license-core` 仅依赖 JDK。普通请求拦截不需要 `license-spring`；后者提供独立 CONTROL 证明能力，只有需要该能力时才引入。构建者将 SDK 的 `java/build/maven-repository/` 复制到受控制品目录，核对 JAR/POM 及摘要。不要使用 `includeBuild` 或相邻 SDK 源码替代发行件。
+这是**产品信任资源**：随产品构建固化，不是客户可上传的运行配置。应用从自己的包资源读取，不允许业务 HTTP、环境变量或客户可写授权目录覆盖信任。Issuer 私钥、口令及记录留在签发端，不能加入客户产品。
 
-Python 3.12 的 uv 消费者可将固定 wheel 放进产品自己的 wheelhouse：
+### Python 3.12
 
-```toml
-[project]
-dependencies = ["metor-license-core==0.6.0"]
-
-[tool.uv.sources]
-metor-license-core = { path = "wheelhouse/metor_license_core-0.6.0-py3-none-any.whl" }
-```
-
-这是并入现有 pyproject.toml 的片段。准备制品时生成并提交消费者锁文件，摘要必须匹配实际 wheel。FastAPI 依赖适配器另需 `metor-license-fastapi==0.6.0`，其元数据固定依赖同版本 core。
-
-SDK wheel 不包含 cryptography、PyJWT 及其平台二进制依赖。制作方提前准备匹配目标 Linux 架构和 Python 3.12 的完整 wheelhouse，使用 `--no-index --find-links` 或 uv offline 验证全新环境安装。客户运行镜像必须已含全部依赖，启动时不运行 Maven、Gradle、pip 或 uv。
-
-## 产品定义与 issuer.toml 一致
-
-每个产品使用独立的一份 `issuer.toml` 启动我方 issuer：
-
-```sh
-license-issuer-web --config /absolute/vendor/other-product/issuer.toml
-```
-
-产品、服务、三个算法域和全部前缀都显式写在该文件中；ICP Diag 也使用完整配置，没有内置默认产品。不同实例使用各自端口及记录／输出目录。issuer 加载一次，Web 解锁后的“SDK 接入配置”页展示当前进程实际使用的公开参数、服务映射和公钥；修改 TOML 后必须重启。CLI 产品命令也只通过 `--config` 指定实例，不能混用旧 `--product`、密钥或记录目录参数；`keygen` 独立使用原参数。
-
-**客户 SDK 不读取我方 issuer.toml、不连接 issuer，也不接受客户环境变量／上传文件覆盖身份参数。** 产品开发者把页面参数内置为代码常量或受控包内资源，通过现有构造接口传入 SDK；固定可信公钥和模式也由产品发行提供。SDK 生产 API 和发行版本仍为 0.6.0。
-
-| issuer.toml／页面字段 | SDK 使用方式 | 变更影响 |
-| --- | --- | --- |
-| `product_id` | Python ProductProfile；Java Config.productId | 许可、安装身份、服务状态和挑战使用该产品标识 |
-| `fingerprint_domain` | Python bytes；Java Config.fingerprintDomain | 改变由机器 ID 派生的指纹及机器绑定 |
-| `binding_domain` | Python bytes；Java Config.bindingDomain | 改变 HOST_INSTALL 安装绑定值 |
-| `recovery_domain` | Python bytes；Java Config.recoveryDomain | 改变恢复目标；这里的域是 ASCII 算法命名空间，无需 DNS 或联网 |
-| `request_prefix` | Python ProductProfile；Java 管理入口的 ManualCodeCodec | 编码／解析商业申请码；Java Config 没有此参数 |
-| `services[].id`、`recovery_prefix` | Python 完整 recovery_prefixes；Java 每服务 Config.service/recoveryPrefix | 服务隔离时间状态，前缀用于申请码编码和 CRC 校验 |
-| `key_id`、公开 SPKI PEM | 两语言可信公钥映射 | 私钥仅在我方 issuer，客户包只含可信公钥 |
-
-例如，另一个产品有 `gateway`、`worker` 两个服务，其完整身份参数可以固定为：
-
-```python
-from license_sdk import ProductProfile
-
-PRODUCT = ProductProfile(
-    product_id="other-product",
-    fingerprint_domain=b"other-product/host-fingerprint/v1",
-    binding_domain=b"other-product/host-install-code/v1",
-    recovery_domain=b"other-product/recovery-target/v1",
-    request_prefix="IC1",
-    recovery_prefixes=(("gateway", "RC101"), ("worker", "RC102")),
-)
-```
-
-Python Runtime 使用 `profile=PRODUCT` 并显式选择 `service="gateway"` 或 `"worker"`，继续使用下文的路径、可信公钥和 CUSTOMER_REQUIRED 模式。Java 每服务构造自己的 Config，例如 gateway：
-
-```java
-var config = new LicenseRuntime.Config(
-    "other-product", "gateway",
-    "other-product/host-fingerprint/v1",
-    "other-product/host-install-code/v1",
-    "other-product/recovery-target/v1",
-    root.resolve("identity/installation.json"),
-    root.resolve("identity/service.key"),
-    root.resolve("shared/active.license.json"),
-    root.resolve("state/gateway/clock.json"),
-    machineId, "RC101");
-```
-
-worker 保留相同产品与域，使用 `"worker"`、`state/worker/clock.json` 和 `"RC102"`。管理入口编码商业申请时另用 `new ManualCodeCodec("IC1")`；不要把这个前缀添到不存在的 Config 参数中。上面是配置片段，`root`、`machineId`、可信公钥及 Runtime 生命周期由产品按下文装配，不是完整安装程序。
-
-**SDK 固化交付后，不可随意更改 issuer.toml 的产品 ID、三个域、商业前缀、既有服务 ID 和恢复前缀。** 新增服务只追加新条目，原映射保持不变；改变 `[[services]]` 顺序不应重新编号。备份 TOML 与产品构建中使用的对应定义。显示名、端口和本机路径不参与协议身份，但搬迁记录／输出必须保留原资料。key ID／公钥更新属于客户信任迁移，必须同步客户发行，不能只改我方 TOML；页面警示不会自动检查或锁住已交付 SDK。
-
-前缀不提供授权真实性，也不单独出现在签名恢复 payload；恢复文件由 Ed25519、产品／安装／服务、目标和窗口验证。错误前缀在申请解析时拒绝，错误恢复域造成目标不一致，二者不能相互替代。三个域、产品和服务也不能只在 issuer 改名后期望旧安装继续工作。
-
-## 2. 安装器初始化目录
-
-接入开发者提供的是受控产品定义、公钥信任以及客户授权目录／宿主机器 ID 路径；来源分别为 issuer 的 SDK 接入配置页、制作方固定发行信任和产品部署约定。下述文件由程序生成，不要求开发者或客户手工编写。该目录位于客户运行机器，与签发端 vendor 目录分开。
-
-| 资料 | 生成方和时间 | 信息来源 |
-| --- | --- | --- |
-| `identity/installation.json` | 安装器首次安装时生成，完成后保留 | 产品 ID 为固化值；schema_version 为协议版本 1；安装 UUID 随机生成；initialized 由安装器完成持久化后设置 |
-| `identity/service.key` | 安装器首次安装时生成，后续复用 | 系统安全随机源生成 32 字节安装主密钥，与我方商业签发私钥不同 |
-| `state/<service>/clock.json` | 安装器生成初始状态；SDK checkpoint／签名恢复时更新 | 安装身份、产品／服务、主密钥与安装时 UTC；SDK 编码接口计算 HMAC |
-| `shared/active.license.json` | Issuer 签发，客户通过产品管理接口导入 | 原始商业签名文件；初始化不生成，没有时为 UNLICENSED，管理能力仍保留 |
-| 状态锁文件 | SDK 运行时按需生成 | SDK 本地状态并发控制 |
-| `recovery-challenge.json` | 时间异常后取得恢复申请时由 SDK 自动生成／复用 | 当前服务的异常状态与 SDK 随机挑战 |
-
-首次部署顺序：校正宿主 UTC → 执行安装初始化 → 启动服务 → 导出机器绑定申请（如需要）→ Issuer 签发 → 产品管理接口导入许可。各服务读取部署映射的真实宿主机器 ID，通常为 `/etc/machine-id`；该标识由操作系统提供，SDK 不生成替代值。
-
-ICP 已有自动初始化命令。在目标 Linux、包含 deployment 目录的交付工作目录执行：
+在产品虚拟环境中安装已交付的制品：
 
 ```bash
-sudo python3 deployment/scripts/local-stack.py license-init \
-  --license-root /opt/icp-diag/runtime/license
+python -m pip install --no-index --find-links ./wheelhouse metor-license-core==0.7.0
 ```
 
-该命令仅依赖 Python 标准库，root 用于设置 ICP 的数值所有者／权限。部署的 `LICENSE_ROOT` 指向同一目录；首次返回 INITIALIZED，完整安装重复执行返回 ALREADY_INITIALIZED 并只校验。无需向命令提供 UUID、随机主密钥、clock 内容或商业文件。
+`wheelhouse` 必须是发行方准备的目标平台完整依赖目录，包含 core、cryptography、PyJWT 及传递依赖；单个 SDK wheel 不包含这些依赖。FastAPI 示例另需产品已安装 FastAPI，显式依赖适配器可用 `metor-license-fastapi==0.7.0`。日常启动不运行 pip/uv，不连接 Issuer 或制品仓库。
 
-**SDK 0.6.0 当前没有跨产品的通用初始化 CLI。** ICP 命令的产品、服务与 UID/GID 固定；其他产品需将自动初始化集成到自身安装包，让客户执行产品安装命令。Python 使用 `uuid.uuid4()`、`secrets.token_bytes(32)` 与 SDK `ClockState`／`encode_clock`；Java 使用 `UUID.randomUUID()`、`SecureRandom` 与 `ClockState`／`ClockStateCodec.encode`。安装器负责持久化、完成标记、幂等核对、并发／中断处理和权限，不能把创建状态移到每次 Runtime 启动或运行文件缺失的自动补造路径。
+把同一份配置复制到你的 Python 包，例如 `my_product/license-product.json`，并在构建规则中包含该 JSON。CLI 安装操作先使用工作目录中的原始下载文件。
 
-以下是 ICP Diag 的实际目录约定，`root` 是挂载到服务内的授权根目录：
+### Java 21
 
-```text
-root/
-  identity/installation.json          安装 UUID 与产品标识
-  identity/service.key                32 字节安装主密钥，不能外发
-  shared/active.license.json          当前商业许可，两服务可共用
-  state/metor/clock.json              Metor 的 HMAC 时间记录
-  state/metor/clock.json.lock         Metor 状态锁，SDK 创建
-  state/metor/recovery-challenge.json Metor 的持久恢复挑战，按需创建
-  state/ai/clock.json                 AI 的独立时间记录
-  state/ai/clock.lock                 AI 状态锁，SDK 创建
-  state/ai/recovery-challenge.json    AI 的持久恢复挑战，按需创建
+将已交付的 `license-core-0.7.0.jar` 放在工作目录，就可直接执行后面的 CLI。核心只依赖 JDK，不需要 Spring、Python 或其他产品源码。应用构建可使用受控制品仓库的依赖：
+
+```groovy
+dependencies {
+    implementation 'io.metor.license:license-core:0.7.0'
+}
 ```
 
-安装器在首次安装时生成身份、主密钥和各服务时间种子。SDK 不自动修复缺失身份、不重建 clock，也不自动签发许可。ICP Diag 使用 deployment 的 `license-init`；它的产品和服务是 ICP 专用，不能直接给其他产品改一个 issuer 配置后复用。新产品安装器必须准备与自身 product_id 一致的身份、32 字节主密钥、每服务 HMAC clock seed、实际目录和权限，并与 Runtime 的产品／服务定义一致。使用 SDK 已有编码接口准备种子，不复制到业务代码另写一套 HMAC 或恢复算法。
+当前坐标为本地验证发行，尚未发布到公共 Maven/PyPI；制作方交付 JAR/wheel 和摘要，或配置自己的受控制品仓库。将公开配置放在 `src/main/resources/license-product.json`，确保构建后位于 classpath 根目录。`license-spring` 仅在需要独立 CONTROL 证明能力时引入，普通 guard 不依赖它。
 
-身份、主密钥和商业许可通常只读挂载给服务；各自 state 目录必须可写。备份时保留安装身份、主密钥、商业许可和对应时间状态。不要用新 UUID、删 clock 或重新初始化来处理时间异常。每个 state 目录仅供一个服务进程和一个 Runtime 使用，不支持多副本共享该目录。
+**本步预期：** SDK 可用，工作目录有 `license-product.json`，产品构建内也包含同一份公开资源。
 
-## 3. Java 构造 Runtime
+## 第二步：在客户首次安装时初始化
 
-下面使用 ICP Diag 的固定产品域。`trustedKeys` 从我方发行信任加载，不能取自客户上传文件或可覆盖的运行参数。路径应指向安装器准备的实际绝对路径。
+执行位置是客户安装／隔离测试目录。先校正宿主 UTC，以下普通快速开始使用当前账号和 `./license-data`，无需 sudo。
+
+Python：
+
+```bash
+license-sdk init --config license-product.json --root ./license-data
+license-sdk status --config license-product.json --root ./license-data --service gateway
+```
+
+Java：
+
+```bash
+java -jar license-core-0.7.0.jar init --config license-product.json --root ./license-data
+java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service gateway
+```
+
+首次返回 `INITIALIZED`，查询得到 `UNLICENSED`，说明资料已准备好、尚无商业许可。SDK 自动初始化**全部配置服务**；重复 init 返回 `ALREADY_INITIALIZED`，核对原资料，不更新身份、密钥或时间高水位。
+
+完成安装后缺失／损坏身份、主密钥或任一服务 clock 会拒绝并保留现场，不自动补造。初始化不承担已有安装新增服务的增量迁移。不要删除授权目录重新 init 处理时间异常或失效许可。
+
+机器绑定使用真实 Linux `/etc/machine-id`，由宿主操作系统提供。容器要挂载真实宿主文件；CLI 可加 `--machine-id /run/your-host/machine-id`。macOS 隔离测试也须显式提供受控测试标识。SDK 不生成替代 machine-id。无绑定许可的核验不会强制读取它。
+
+## 第三步：从产品资源创建同一个 Runtime
+
+授权目录和服务 ID 是部署选择，公开信任来自产品资源。工厂返回原 `LicenseRuntime`，旧状态、guard、preflight 和恢复 API 继续使用。
+
+### Python
+
+```python
+from importlib.resources import files
+from pathlib import Path
+from license_sdk.runtime import LicenseRuntime
+
+
+def create_runtime(root: Path) -> LicenseRuntime:
+    raw = files("my_product").joinpath("license-product.json").read_bytes()
+    return LicenseRuntime.from_config(raw, root=root, service="gateway")
+```
+
+`my_product` 换成你的实际包名。需要真实宿主挂载时传 `machine_id_file=Path("/run/your-host/machine-id")`，不能从业务请求接受路径。
+
+在现有 FastAPI lifespan 中启动和关闭：
+
+```python
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+
+def application(runtime):
+    @asynccontextmanager
+    async def lifespan(app):
+        runtime.start()
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(runtime.close)
+
+    return FastAPI(lifespan=lifespan)
+```
+
+产品启动装配使用 `runtime = create_runtime(Path("./license-data"))`，将它传给 `application` 和已有业务／管理组件。非 Web 应用在启动调用 `start()`，在 finally 调用 `close()`。
+
+### Java
 
 ```java
-import io.metor.license.core.LicenseGuard;
 import io.metor.license.core.LicenseRuntime;
-import io.metor.license.core.TimeSource;
+import java.io.IOException;
 import java.nio.file.Path;
-import java.security.PublicKey;
-import java.util.Map;
 
-public final class LicenseIntegration {
-    public static LicenseRuntime create(
-            Path root, Path machineId, Map<String, PublicKey> trustedKeys) {
-        var config = new LicenseRuntime.Config(
-            "icp-diag", "metor",
-            "icp-diag/host-fingerprint/v1",
-            "icp-diag/host-install-code/v1",
-            "icp-diag/recovery-target/v1",
-            root.resolve("identity/installation.json"),
-            root.resolve("identity/service.key"),
-            root.resolve("shared/active.license.json"),
-            root.resolve("state/metor/clock.json"),
-            machineId, "RC1J");
-        return new LicenseRuntime(config, trustedKeys, TimeSource.system());
-    }
-
-    public static void protectedOperation(LicenseGuard guard, Runnable operation) {
-        guard.requireValid();
-        operation.run();
+public final class ProductLicense {
+    public static LicenseRuntime create(Path root) throws IOException {
+        try (var input = ProductLicense.class.getResourceAsStream("/license-product.json")) {
+            if (input == null) throw new IOException("missing product license config");
+            return LicenseRuntime.fromConfig(input.readAllBytes(), root, "gateway");
+        }
     }
 }
 ```
 
-`Config` 最后一个 `recoveryPrefix` 必须显式传入，ICP 示例的 Metor 为 RC1J。旧兼容构造器仍可验证商业许可，但不能取得恢复申请。SDK 中的 ICP 示例和 Python ICP_DIAG 常量只是已有产品定义；issuer 不依赖该常量。其他产品按前节将 issuer.toml／页面的全部身份参数固定到产品，不能只替换 productId。
+需要宿主挂载时使用第四参数 `Path.of("/run/your-host/machine-id")`。现有产品生命周期在启动调用 `ProductLicense.create(root).start()`，注入同一个实例，在关闭钩子调用 `close()`。最小命令程序可用 try-with-resources：
 
-应用启动时创建并注入这一个实例。生命周期定时器每 30 秒调用 `runtime.checkpoint()`，无请求时也执行，并记录返回状态及调度失败；关闭应用时停止定时器。请求只调用 `requireValid()`，不要把 checkpoint 放入每次请求。
-
-`requireValid()` 仅在 ACTIVE 时通过，失败抛出 `LicenseDeniedException`，可读取 `state()`、`reasons()`。Java 核心没有开发模式开关；产品若提供开发发行模式，必须在受控构建元数据中固定，客户参数不能切换。
-
-## 4. Python 构造与入口检查
-
-```python
-from pathlib import Path
-
-from license_sdk import ICP_DIAG
-from license_sdk.guard import LicenseGuard
-from license_sdk.runtime import BuildMode, LicenseRuntime, RuntimePaths
-
-
-def create_runtime(root: Path, machine_id: Path, trusted_keys: dict[str, bytes]) -> LicenseRuntime:
-    return LicenseRuntime(
-        profile=ICP_DIAG,
-        service="ai",
-        paths=RuntimePaths(root=root, machine_id_file=machine_id),
-        trusted_keys=trusted_keys,
-        mode=BuildMode.CUSTOMER_REQUIRED,
-    )
-
-
-def protected_operation(guard: LicenseGuard) -> str:
-    guard.require_valid()
-    return "继续原业务逻辑"
+```java
+try (var runtime = ProductLicense.create(Path.of("./license-data")).start()) {
+    System.out.println(runtime.inspect().state());
+}
 ```
 
-公钥映射为 key ID 到 SPKI PEM/DER 字节；路径必须为绝对路径。模式由构建固定，客户运行不使用 DEVELOPMENT。生命周期每 30 秒调用 `runtime.checkpoint()`；异步服务用 `asyncio.to_thread` 执行文件操作，避免阻塞事件循环。请求入口 `require_valid()` 失败抛出 `LicenseDeniedError`，其 `state`、`reasons` 来自同一次判断。
+SDK 内部每 30 秒 checkpoint，无请求也运行；重复 start 不增加任务，close 停止并等待退出。旧产品若自行调度 checkpoint，选择保留旧调度或换成 SDK start，不能同时启用。状态查询与 guard 不逐请求强制 checkpoint；恢复挑战仍由 Runtime 按需维护。
 
-FastAPI 可使用显式依赖适配器：
+**本步预期：** 应用能查询 UNLICENSED，正常关闭，没有自建定时循环。
 
-```python
-from fastapi import APIRouter, Depends
-from license_sdk.guard import LicenseGuard
-from license_sdk_fastapi import require_license
+## 第四步：申请 → Issuer 签发 → SDK 安全导入
 
+在同一个客户安装目录执行。若应用选择了受控自定义机器标识路径，request／import 也要使用同一个 `--machine-id`。
 
-def protected_router(guard: LicenseGuard, authenticate) -> APIRouter:
-    router = APIRouter()
-    check_license = require_license(guard)
+Python：
 
-    @router.post("/run", dependencies=[Depends(authenticate), Depends(check_license)])
-    def run():
-        return {"accepted": True}
-
-    return router
+```bash
+license-sdk request --config license-product.json --root ./license-data --service gateway --output request.json
+# 将 request.json 交给签发人员，在 Issuer 商业签发页上传、选择期限并下载。
+license-sdk import --config license-product.json --root ./license-data --service gateway --file customer.license.json
+license-sdk status --config license-product.json --root ./license-data --service gateway
 ```
 
-`authenticate` 是产品已有的账号鉴权依赖。适配器默认返回 403；如需原产品信封，传 `on_denied` 返回产品自己的异常。中间件与固定关键方法共用同一产品 guard，捕获授权拒绝后立即返回，不再次读状态，也不继续业务操作。
+Java：
 
-## 5. 请求清单与固定关键入口
+```bash
+java -jar license-core-0.7.0.jar request --config license-product.json --root ./license-data --service gateway --output request.json
+# 把签发下载文件保存为当前目录的 customer.license.json。
+java -jar license-core-0.7.0.jar import --config license-product.json --root ./license-data --service gateway --file customer.license.json
+java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service gateway
+```
 
-SDK 不包含产品路径或自动注册业务过滤器。产品在原身份鉴权之后匹配启动时加载的受控 API；匹配才调用 guard，未匹配进入原请求链。对极少数必须保护的方法，在第一条业务语句前固定调用同一 guard，构造器必须要求该依赖。
+申请由真实安装和机器标识生成，不含机器 ID 原文／安装主密钥。选择无绑定商业许可可跳过申请，直接让签发人员选择 UNBOUND。`TERM/PERPETUAL × HOST_INSTALL/UNBOUND` 四种组合均保留。
 
-ICP Diag 的产品 guard 还持有启动策略校验结果：构建对最终入包 JSON 原始字节固定 SHA256，启动校验非空清单、严格规则、资源唯一性及摘要，创建不可变规则。策略无效时先拒绝业务及固定关键入口，精确维护例外保留原鉴权。运行中不重载；文件被改后，下次启动拒绝，需恢复正确发行包再重启。外部 YAML、环境变量或清空清单不能关闭检查。
+**预期：** 导入 APPLIED，查询 ACTIVE；第三步已运行实例的下一次状态查询和 guard 也能观察新许可。SDK 会完成验签、产品／绑定／期限预检、原始文件摘要比较和原子发布，不能自行用 `write_bytes`／复制替换活动文件。
 
-这部分属于产品接入代码，不是通用 SDK 的自动行为。当前固定入口只有 Metor 的 `TicketService.create`、AI 的 `InvocationService.invoke`；不增加后台任务、排队、租约、重试或业务实体中的授权状态。
+错误文件不会替换旧许可。OUTCOME_UNKNOWN 表示可能已发布但持久性待确认：保留现场、核对原始摘要并重试同一文件，不换身份或删除状态。同字节重试可确认已发布数据，返回真实当前状态，不延长许可。
 
-## 6. 两个恢复管理入口
+## 第五步：账号鉴权后、关键业务副作用前调用 guard
 
-先校正宿主 UTC，再通过已有管理员鉴权调用同一个运行实例。控制器只负责鉴权、文件大小和结果映射，不创建临时 Runtime、不直接写 clock。
+Python：
 
-| 动作 | Java | Python |
+```python
+from license_sdk.guard import LicenseGuard
+
+
+def critical_operation(license: LicenseGuard, operation):
+    license.require_valid()
+    return operation()
+```
+
+Java：
+
+```java
+public void execute(Runnable business) {
+    runtime.requireValid();
+    business.run();
+}
+```
+
+将第三步同一 Runtime 注入关键服务；固定方法首行核验，直接调用和其他入口也经过该方法。账号权限检查仍由产品完成。缺许可／到期时必须在写数据、发消息或调用外部系统之前拒绝，不能捕获后继续执行。
+
+Python `LicenseDeniedError.state/reasons`，Java `LicenseDeniedException.state()/reasons()` 来自本次判断；HTTP 通常映射 403，不再二次查询覆盖原因。状态／申请／导入／恢复维护入口保留原管理员认证，不能被业务 guard 拦住。
+
+## 按需加入管理接口
+
+首次接入可完全使用 CLI；有产品管理页面时，控制器调用下面原 Runtime 方法，不再自行实现文件事务。
+
+| 动作 | Python | Java |
 | --- | --- | --- |
-| 取得申请 | `runtime.getOrCreateRecoveryRequest()` | `runtime.get_or_create_recovery_request()` |
-| 保存申请对象 | `request.toJson()` 返回 byte[] | `request.to_bytes()` 返回 bytes |
-| 返回申请 JSON | `request.toMap()` | `request.to_dict()` |
-| 应用恢复 | `runtime.applyRecovery(rawBytes)` | `runtime.apply_recovery(raw_bytes)` |
-| 结果 | `actionStatus()`、`status()`、`recoveryId()` | `action_status`、`status`、`recovery_id` |
-| 异常映射 | `RecoveryException.code()/httpStatus()` | `RecoveryError.code/http_status` |
+| 只读状态 | `status(read_only=True)` | `inspect()` |
+| 读取活动文件原始摘要，缺失为 null | `license_file_digest()` | `licenseFileDigest()` |
+| 商业申请对象 | `commercial_request()` | `commercialRequest()` |
+| 候选预检，不发布 | `preflight(raw)` | `preflight(raw)` |
+| 安全导入 | `import_license(raw, expected_file_digest)` | `importLicense(raw, expectedRawDigest)` |
+| 取得时间恢复申请 | `get_or_create_recovery_request()` | `getOrCreateRecoveryRequest()` |
+| 应用原始恢复文件 | `apply_recovery(raw)` | `applyRecovery(raw)` |
 
-申请序列化方法已返回字节，不要再 JSON 序列化这些字节。若原 API 使用成功信封，应把申请对象放进 data；交给 issuer 的文件只含 data 对象，不能是整份 HTTP 响应。申请只在时间异常时适用，重复取得、并发取得及重启复用仍适用的挑战，目标变化才重新申请。
+状态接口应返回原始文件摘要。导入 API 先让客户端查询，再随上传提交所看到的旧摘要；不存在用 None/null，HTTP 的 NONE 哨兵在产品控制器转换。摘要冲突返回 409，不能自动改成最新摘要后覆盖他人的更新。CLI 自动读取摘要并在事务锁内比较。
 
-恢复文件以原始字节交给 SDK，产品 API 限制至多 64KiB，不允许客户端覆盖恢复目标、时间或 epoch。签名文件最多七天窗口，按校正后的墙钟严格判断；一天回拨容差不扩展该窗口。
+控制器仍需真实登录／管理员权限；Cookie 登录校验 CSRF，所有管理响应 `Cache-Control: no-store`。原始商业／恢复文件限 1–65536 字节，流式读取时限制，不把任意长度请求完整读进内存后才判断。未知异常返回有界存储错误，不泄漏堆栈或秘密。
 
-| 返回 | 产品处理 |
+导入结果包含 `action_status/file_digest/status`（Java 对应 camelCase accessors）。APPLIED／ALREADY_APPLIED 表示持久性已确认；OUTCOME_UNKNOWN 映射 202，状态可能暂不可读，不能误报“旧文件未变”。Python `OnboardingError.code`／Java `OnboardingException.code()` 的状态冲突映射 409、候选错误映射 400、存储失败映射 503。完整可复制路由示例见 Issuer 解锁后的 `/docs` 对应语言页签。
+
+## 时间异常的处理
+
+1. 先校正宿主 UTC，在同一个 Runtime 取得恢复申请；没有适用异常时不会生成恢复文件。
+2. Python 申请用 `to_dict()/to_bytes()`，Java 用 `toMap()/toJson()` 导出；交给 Issuer 的是申请对象，不是产品 API 整份成功信封。
+3. Issuer 签发后，原始文件交同一个 Runtime 应用。首次 APPLIED，重复 ALREADY_APPLIED，OUTCOME_UNKNOWN 保留文件重试。
+
+SDK 自动维护稳定挑战、目标、原子提交和实例刷新。恢复只改变本服务 clock，不修改商业文件、另一服务或期限；商业许可已过期时恢复后仍 EXPIRED。窗口最长七天，按校正后的 UTC 严格判断；一天回拨容差不扩展商业期限或恢复窗口。恢复异常提供 Python `code/http_status` 或 Java `code()/httpStatus()`，按分类映射；目标改变则重新取得申请。
+
+## 安装资料与高级部署
+
+| 资料 | 来源和生成时机 |
 | --- | --- |
-| APPLIED | 首次持久提交已确认，同一 Runtime 内存已刷新 |
-| ALREADY_APPLIED | 此恢复编号已完成，不重复重置；窗口过后仍可确认 |
-| OUTCOME_UNKNOWN | 返回待核对/202，保持受限，使用同一文件重试 |
-| LICENSE_STORAGE_OUTCOME_UNKNOWN | 取得申请尚未确认，返回 202，重复取得，暂不交我方签发 |
-| LICENSE_RECOVERY_TARGET_CHANGED | 409，取得当前申请，重新签发 |
-| LICENSE_RECOVERY_NOT_REQUIRED | 409，当前没有适用的时间恢复原因 |
-| LICENSE_RECOVERY_INVALID / LICENSE_RECOVERY_WINDOW_INVALID | 400，核对文件、目标服务、UTC 与签名窗口 |
-| LICENSE_STORAGE_FAILED | 503，排查本服务 state 权限及存储后重试 |
+| SDK 和公开配置 | 制作方提供固定制品，开发者下载配置并纳入产品资源 |
+| root、真实机器标识路径、运行账号／权限 | 产品部署约定，不从 HTTP 传入 |
+| `identity/installation.json` | SDK init 生成产品标识、随机 UUID 和完成标记 |
+| `identity/service.key` | SDK init 从安全随机源生成 32 字节安装主密钥；不能外发，不能签商业许可 |
+| `state/<service>/clock.json` | SDK init 生成所有服务初值，SDK checkpoint／恢复维护 |
+| `shared/active.license.json` | Issuer 签发，由 SDK import 发布；init 不生成 |
+| 本地锁和 `recovery-challenge.json` | SDK 运行时按需生成 |
 
-恢复只改本服务时间状态，商业文件、机器绑定、期限和另一服务时间文件不变。成功后的商业状态仍可能 EXPIRED，需要另外续期。缺失/损坏身份或主密钥不属于自动恢复范围。
+本机 POSIX（Linux／macOS）且无符号链接路径；普通目录由当前账号持有，默认 0700／0600。每服务一个进程、一个 Runtime，独立 state。服务可共享产品身份和商业文件；新增安装／导入锁双语言互通不代表可以双进程维护同一服务 clock。Windows、网络盘和多副本状态共享不在本版支持范围。
 
-ICP Diag 的路由及操作步骤见 [issuer 恢复签发](../../license-issuer/docs/recovery-cn.md)和[客户恢复手册](../../deployment/docs/license-recovery.md)。其他产品可使用相同 SDK 方法定义自己的管理 API。
+多账号容器由部署层准备 UID/GID、组权限及挂载，SDK 不递归 chown、不放宽既有权限。ICP Diag 继续用原 deployment `license-init`、`/run/icp-license` 和真实宿主 `/run/icp-host/machine-id`；Metor／AI 生产装配不由本次自动迁移。不要直接把普通单用户初始化权限套到 ICP 多 UID 容器。
 
-## 7. 从旧接入升级
+备份和恢复保留身份、主密钥、商业文件及对应时间记录；已完成安装不能重新生成 UUID／key／clock。当前 init 不为已安装产品增补新服务，须另行受控迁移。
 
-| 旧做法 | 0.6.0 接入 |
-| --- | --- |
-| Java OperationPolicy、beforeExecution | `LicenseGuard.requireValid()`，删除操作枚举和任务上下文 |
-| Python 操作分类/check | `LicenseGuard.require_valid()`，适配器显式传 guard |
-| 每请求强制保存时钟 | 请求只观察，生命周期独立每 30 秒 checkpoint |
-| 只更新业务源码、混用旧 JAR/wheel | SDK、适配器、产品依赖及锁文件统一 0.6.0，核对实际制品摘要 |
-| 可被外部空配置覆盖的规则 | 产品包内清单 + 构建摘要 + 启动加载；固定关键方法仍直接调用 guard |
-| 商业许可导入当作时间修复 | 正常续期与签名时间恢复分开，分别调用已有导入和恢复 API |
+## 从 SDK 0.6.0 升级
 
-SDK 版本与许可 schema_version 独立，商业许可 v1 继续使用。保留旧 0.4.0 制品供回退核查，实验 0.5.0 不使用。回拨只有超过 86,400 秒才作为异常拒绝，高水位仍不下降；商业期限始终为精确的 `[not_before, expires_at)`，没有提前生效或延迟到期宽限。
+旧构造器、guard、状态和恢复 API 保留。SDK 版本与商业／clock／恢复 schema 独立，原 v1 许可与状态字节可继续验证，无需因升级重签。0.6.0 原发行件保留，不覆盖重发。
 
-完成接入后至少验证：有效/失效入口、未匹配放行、直接方法调用拒绝、清单篡改后重启拒绝、无请求时 checkpoint、同 Runtime 恢复及同文件重试。双语言实际签发验证见根 README 的验证命令。
+- 新接入优先使用配置工厂、init、request／import 和 start／close；无需旧版手动安装器和发布事务。
+- 已有产品可先保持原接入。采用新工厂时把**完全相同**的产品／服务／域／前缀／可信公钥固化到新资源，保留原授权目录。
+- 采用 SDK start／close 时移除原 checkpoint 调度；管理接口 URL、账号权限、业务 guard 和产品清单策略可保持。
+- 产品 ID、三个域、既有服务和前缀在交付后不可随意重定义。密钥轮换要协调 SDK 信任；不能只改我方 issuer.toml。显式字段仍在完整 TOML，未引入插值或默认推导。
+
+## 验收
+
+陌生产品不改 SDK 源码、不引用 ICP 工程即可按五步完成。至少核对：未授权业务拒绝且无副作用、管理员管理可达；签发导入后同实例 ACTIVE；错误许可不覆盖旧文件；无请求也 checkpoint、关闭正常；同实例恢复／重复应用及另一服务不变。离线安装必须从完整平台依赖和实际发行件测试，不能用 PYTHONPATH 或相邻源码冒充安装。

@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 from license_sdk.guard import LicenseDeniedError
@@ -48,6 +48,10 @@ from license_sdk.verification import (
     parse_utc_timestamp,
     verify_license,
 )
+
+if TYPE_CHECKING:
+    from license_sdk.commercial import ImportResult
+    from license_sdk.product import ProductConfig
 
 MAX_COUNTER = (1 << 63) - 1
 
@@ -360,6 +364,110 @@ class LicenseRuntime:
         self._master: bytes | None = None
         self._pending_recovery_id: str | None = None
         self._invalidated_nonce: str | None = None
+        self._product: ProductConfig | None = None
+        self._lifecycle_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._worker: threading.Thread | None = None
+        self._closed = False
+        self.last_checkpoint_status: RuntimeStatus | None = None
+
+    @classmethod
+    def from_config(
+        cls,
+        raw: bytes,
+        *,
+        root: Path,
+        service: str | None = None,
+        machine_id_file: Path = Path("/etc/machine-id"),
+    ) -> "LicenseRuntime":
+        from license_sdk.installation import absolute_path
+        from license_sdk.product import ProductConfig
+
+        product = ProductConfig.from_bytes(raw)
+        instance = cls(
+            profile=product.profile,
+            service=product.select_service(service),
+            paths=RuntimePaths(absolute_path(root), Path(os.path.abspath(machine_id_file))),
+            trusted_keys=product.trusted_keys,
+            mode=BuildMode.CUSTOMER_REQUIRED,
+        )
+        instance._product = product
+        return instance
+
+    def commercial_request(self) -> dict[str, object]:
+        from license_sdk.codes import encode_code
+        from license_sdk.installation import OnboardingError
+
+        with self._lock:
+            if self._product is None:
+                raise OnboardingError(
+                    "LICENSE_CONFIG_REQUIRED", "load public product configuration first"
+                )
+            self._identity()
+            assert self._installation is not None
+            try:
+                fingerprint = host_fingerprint(
+                    self.profile, read_bounded(self.paths.machine_id_file, 33)
+                )
+            except (OSError, ValueError) as exc:
+                raise OnboardingError(
+                    "LICENSE_MACHINE_ID_INVALID",
+                    "provide real host machine-id path or request UNBOUND issuance",
+                ) from exc
+            target = binding_id(self.profile, fingerprint, self._installation)
+            return {
+                "schema_version": 1,
+                "kind": "license-request",
+                "product_id": self.profile.product_id,
+                "binding_type": "HOST_INSTALL",
+                "binding_scheme": "host-install-code-v1",
+                "binding_id": target.hex(),
+                "request_code": encode_code(self.profile.request_prefix, target),
+                "request_id": str(uuid4()),
+                "generated_at": utc_text(self.time.wall_now()),
+            }
+
+    def license_file_digest(self) -> str | None:
+        from license_sdk.commercial import current_file_digest
+
+        return current_file_digest(self.paths.root / "shared/active.license.json")
+
+    def import_license(self, raw: bytes, expected_file_digest: str | None) -> "ImportResult":
+        from license_sdk.commercial import import_license
+
+        return import_license(self, raw, expected_file_digest)
+
+    def start(self) -> "LicenseRuntime":
+        with self._lifecycle_lock:
+            if self._closed:
+                raise ValueError("runtime is closed")
+            if self._worker is None:
+                self._worker = threading.Thread(
+                    target=self._checkpoint_loop, name="license-checkpoint", daemon=True
+                )
+                self._worker.start()
+        return self
+
+    def _checkpoint_loop(self) -> None:
+        while not self._stop.wait(30):
+            try:
+                current = self.checkpoint()
+                self.last_checkpoint_status = current
+                if current.state not in (RuntimeState.ACTIVE, RuntimeState.DEVELOPMENT):
+                    logging.getLogger(__name__).warning(
+                        "license checkpoint restricted: %s", current.state
+                    )
+            except Exception:
+                logging.getLogger(__name__).exception("license checkpoint failed")
+
+    def close(self) -> None:
+        with self._lifecycle_lock:
+            self._closed = True
+            self._stop.set()
+            worker = self._worker
+        # Never join under the Runtime mutex: checkpoint may currently hold it.
+        if worker is not None and worker is not threading.current_thread():
+            worker.join()
 
     def _identity(self) -> None:
         data = parse_json_object(read_bounded(self.paths.root / "identity/installation.json", 4096))

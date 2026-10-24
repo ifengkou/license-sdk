@@ -1,13 +1,119 @@
-# Java license SDK Phase 6
+# Java license SDK 0.7.0
+
+Download the core JAR from [GitHub Releases](https://github.com/ifengkou/license-sdk/releases). See [release and offline installation](../docs/releasing.md) for checksums, local JAR dependencies, and the tag-based CI release procedure. The core requires JDK 21 only.
 
 [中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
 
 Java 21 standalone Gradle project. Provisional local coordinates are
-`io.metor.license:license-core:0.6.0` and `io.metor.license:license-spring:0.6.0`.
-Version 0.6.0 is the unified local artifact target; no remote publication is performed.
+`io.metor.license:license-core:0.7.0` and `io.metor.license:license-spring:0.7.0`.
+Version 0.7.0 adds standalone onboarding; no remote publication is performed. Existing 0.6.0 artifacts and constructors remain available unchanged.
 Existing 0.4.0 and Phase 5.5 validation artifacts remain unchanged. These names are
 not a confirmed organization namespace or a remote publication.
 The Gradle 8.14 wrapper is copied unchanged from the existing Metor wrapper.
+
+
+## Five-step quick start (JDK 21 only)
+
+Use the prebuilt `license-core-0.7.0.jar`. The standalone core has no Spring or
+Python dependency. Run the following commands in a private working directory as
+your normal user; no sudo or handwritten installation files are needed.
+
+1. Unlock your Issuer, open **SDK 接入配置**, and download `license-product.json`.
+   Put it in your application's controlled resources. It contains public keys,
+   but determines which signatures your application trusts: do not load a
+   replacement from HTTP uploads or the customer's writable license-data directory.
+2. Initialize customer data once:
+
+   ```sh
+   java -jar license-core-0.7.0.jar init --config license-product.json --root ./license-data
+   java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service YOUR_SERVICE
+   ```
+
+   `init` creates the UUID, 32-byte installation key, and all configured services'
+   authenticated clock files. Expect `INITIALIZED`, then `UNLICENSED` from status.
+   Repeating init gives `ALREADY_INITIALIZED` without changing the identity, key,
+   clocks or commercial file. Never delete these files to repair an existing installation.
+3. Create one Runtime from the bundled resource, and close it with the application's
+   lifecycle. `examples/LicenseQuickStart.java` is a complete executable example:
+
+   ```java
+   byte[] publicConfig;
+   try (var in = MyApplication.class.getResourceAsStream("/license-product.json")) {
+       if (in == null) throw new IllegalStateException("Missing product resource");
+       publicConfig = in.readNBytes(65537);
+   }
+   var runtime = LicenseRuntime.fromConfig(publicConfig, Path.of("./license-data"), "YOUR_SERVICE");
+   runtime.start(); // application startup; call runtime.close() at application shutdown
+   ```
+
+   Replace `YOUR_SERVICE` with an ID displayed by your Issuer. A single-service
+   product may pass null or omit CLI `--service`; a multi-service product must choose.
+4. Export the request, sign it in Issuer's commercial page, then import the original download:
+
+   ```sh
+   java -jar license-core-0.7.0.jar request --config license-product.json --root ./license-data --service YOUR_SERVICE --output request.json
+   java -jar license-core-0.7.0.jar import --config license-product.json --root ./license-data --service YOUR_SERVICE --file customer.license.json
+   java -jar license-core-0.7.0.jar status --config license-product.json --root ./license-data --service YOUR_SERVICE
+   ```
+
+   Expect `APPLIED` and `ACTIVE`. These commands use the actual Linux
+   `/etc/machine-id`; a container must supply a controlled host mount using
+   `--machine-id /run/host/machine-id`. The factory's fourth Path argument provides
+   the same override. macOS has no Linux machine ID: supply an actual deployment
+   identifier for bound tests, or use UNBOUND signing, which never reads machine-id.
+   `request` always requests a host/install binding and refuses unavailable host IDs.
+5. Keep your account authorization, then put `runtime.requireValid()` immediately
+   before each protected business side effect. `runtime.inspect()` returns the state
+   and reasons for a status page. Missing/invalid licensing must not hide admin status,
+   request, import, or recovery maintenance routes. A running Runtime sees imported
+   licenses on its next validation; no restart or replacement Runtime is needed.
+
+To run the example independently, copy only the JAR, downloaded public configuration,
+and `LicenseQuickStart.java` to a temporary working directory:
+
+```sh
+javac -cp license-core-0.7.0.jar LicenseQuickStart.java
+java -cp license-core-0.7.0.jar:. LicenseQuickStart ./license-data YOUR_SERVICE
+```
+
+Initialization uses private current-user directories/files (0700/0600). Shared
+multi-account container permissions remain the product installer's responsibility;
+existing ICP deployments keep their installer, mount and group setup.
+
+## Management integration and persistence
+
+`commercialRequest()` returns the exact issuer-compatible request map;
+`licenseFileDigest()` reads the current raw file SHA-256, or null when absent.
+`importLicense(candidateBytes, expectedRawDigest)` checks the digest under the
+shared publish lock, preflights signature/product/actual binding/time, and atomically
+publishes original bytes. `ImportResult` contains `actionStatus()`, `fileDigest()`
+and the actual `status()`. `ALREADY_APPLIED` confirms existing bytes without
+requiring their commercial window to remain ACTIVE; it still verifies signature,
+product and binding. A new candidate must be ACTIVE.
+
+For HTTP, obtain the expected digest from the client's status observation; a stale
+value is `LICENSE_STATE_CONFLICT`, not permission to overwrite. Only an authorized
+installer/admin may import. Retain account/admin authentication, Cookie CSRF,
+bounded request bodies and `Cache-Control: no-store`. Map `LicenseException`
+validation refusals to 400, conflicts to 409, storage errors to 503, and
+`OUTCOME_UNKNOWN` to 202. Unknown means the candidate may already be published;
+query its raw digest and retry the same file. Never report that the old file was
+unchanged after an uncertain publish. If post-publish observation itself fails,
+`status()` in that unknown result can be null; continue querying before claiming success.
+
+Both SDKs use `.init.lock` and `shared/license-import.lock` with POSIX byte-range
+locks (offset 0, length 1), plus local thread exclusion. Busy operations return a
+bounded conflict. Init resumes only a valid unfinished draft with its original
+UUID/key; corrupt or ambiguous data is preserved and refused. Completed installs
+are never repaired or extended with new service seeds by init. Linux and macOS
+local POSIX storage are supported; Windows, network filesystems, and multiple
+live Runtime processes sharing one service's clock are outside this contract.
+
+A scheduler logs restricted checkpoints/errors and continues after a failed tick.
+`start()` and `close()` are idempotent; closing waits for in-flight work without
+holding the Runtime monitor. A closed Runtime cannot start a new scheduler;
+create a new instance when restarting the application. Original constructors, manual checkpoint scheduling,
+status/preflight/guard and recovery methods remain compatible.
 
 Implemented:
 
@@ -42,8 +148,7 @@ key handling remain exclusively in the issuer project.
 the license or clock. `inspect()` observes restrictions without checkpointing.
 `LicenseRuntime` implements `LicenseGuard.requireValid()`: ACTIVE continues, otherwise
 `LicenseDeniedException` carries `state()` and immutable `reasons()` from the same
-observation. Request validation never checkpoints; the host lifecycle calls
-`checkpoint()` every 30 seconds. Clock rollback is rejected only beyond 86,400
+observation. Request validation never checkpoints. Use `start()` / `close()` to own one 30-second checkpoint task, or retain your existing lifecycle calling `checkpoint()`; choose one scheduler. Clock rollback is rejected only beyond 86,400
 seconds; commercial validity remains exactly [not_before, expires_at), with no grace.
 Products choose protected entry points after account authorization. No read-only
 operation policy, background task admission or continuation is installed.
@@ -88,19 +193,19 @@ included in runtime JARs. Production hosts retain their own admin authentication
 ```
 
 The `examples/StandaloneCodec.java` smoke uses only the built core JAR and JDK 21.
-Copy that source and `license-core/build/libs/license-core-0.6.0.jar` into an empty
+Copy that source and `license-core/build/libs/license-core-0.7.0.jar` into an empty
 directory, then run:
 
 ```sh
-javac -cp license-core-0.6.0.jar StandaloneCodec.java
-java -cp license-core-0.6.0.jar:. StandaloneCodec
+javac -cp license-core-0.7.0.jar StandaloneCodec.java
+java -cp license-core-0.7.0.jar:. StandaloneCodec
 ```
 
 For local publication verification, run
 `./gradlew publishAllPublicationsToVerificationRepository`. This writes both
 versioned Maven publications to `build/maven-repository`, never a remote registry.
-A detached consumer may resolve `io.metor.license:license-spring:0.6.0` from a copy
-of that directory; its POM pins `license-core:0.6.0` transitively. The copied
+A detached consumer may resolve `io.metor.license:license-spring:0.7.0` from a copy
+of that directory; its POM pins `license-core:0.7.0` transitively. The copied
 repository is sufficient without any SDK source or business checkout.
 
 No build uses sibling business source or `.agents` files. Gradle needs its pinned

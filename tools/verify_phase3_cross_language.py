@@ -251,7 +251,7 @@ def main() -> None:
     sdk = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--java-jar", type=Path, default=sdk / "java/license-core/build/libs/license-core-0.6.0.jar"
+        "--java-jar", type=Path, default=sdk / "java/license-core/build/libs/license-core-0.7.0.jar"
     )
     jar = parser.parse_args().java_jar.resolve()
     master = bytes(range(32))  # Synthetic installation key, never production trust.

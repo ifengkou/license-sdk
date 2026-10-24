@@ -1,6 +1,6 @@
 {
-  "sdk_version": "0.6.0",
-  "status": "phase-6-single-service-recovery",
+  "sdk_version": "0.7.0",
+  "status": "simple-product-onboarding",
   "implemented_protocols": [
     "IC1",
     "RC1J",
@@ -41,5 +41,6 @@
     "file": "recovery-v1-vectors.json",
     "sha256": "7e85304bf1a3390e3ef8dcdfb5a63cb51ff781b4d78af141982ef604fc005025",
     "included_in_runtime_artifacts": false
-  }
+  },
+  "sdk_product_config_schema_version": 1
 }

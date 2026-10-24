@@ -19,3 +19,6 @@ tasks.register('writeRuntimeClasspath') {
             configurations.runtimeClasspath).asPath
     }
 }
+
+// The core artifact is also an independent JDK-only installer and maintenance CLI.
+tasks.named('jar') { manifest { attributes 'Main-Class': 'io.metor.license.core.LicenseCli' } }

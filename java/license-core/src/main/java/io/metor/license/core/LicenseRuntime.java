@@ -18,7 +18,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Local license validation and durable time protection, independent of business routes. */
-public final class LicenseRuntime implements LicenseGuard {
+public final class LicenseRuntime implements LicenseGuard, AutoCloseable {
     public record Config(String productId, String service, String fingerprintDomain, String bindingDomain,
         String recoveryDomain, Path identityFile, Path serviceKeyFile, Path licenseFile, Path clockFile,
         Path machineIdFile, String recoveryPrefix) {
@@ -57,6 +57,142 @@ public final class LicenseRuntime implements LicenseGuard {
     private boolean persistenceFailed;
     private UUID invalidatedChallengeNonce;
     private CommercialLicenseVerifier.VerifiedLicense cached;
+    private ProductConfig productConfig;
+    private final Object lifecycleLock = new Object();
+    private java.util.concurrent.ScheduledExecutorService scheduler;
+    private boolean closed;
+
+    /** Loads public trust from product-controlled bytes; never initializes customer data. */
+    public static LicenseRuntime fromConfig(byte[] config, Path root, String service) throws IOException {
+        return fromConfig(config, root, service, Path.of("/etc/machine-id"));
+    }
+    public static LicenseRuntime fromConfig(byte[] raw, Path root, String service, Path machineId) throws IOException {
+        ProductConfig product = ProductConfig.parse(raw);
+        String selected = product.selectService(service);
+        Path safe = OnboardingFiles.checked(root);
+        var config = new Config(product.productId(), selected, product.fingerprintDomain(), product.bindingDomain(),
+            product.recoveryDomain(), safe.resolve("identity/installation.json"), safe.resolve("identity/service.key"),
+            safe.resolve("shared/active.license.json"), safe.resolve("state").resolve(selected).resolve("clock.json"),
+            machineId == null ? null : machineId.toAbsolutePath().normalize(), product.services().get(selected));
+        var runtime = new LicenseRuntime(config, product.trustedKeys(), TimeSource.system());
+        runtime.productConfig = product;
+        return runtime;
+    }
+
+    /** Explicitly owns one checkpoint task; old constructors never start a thread. */
+    public LicenseRuntime start() {
+        synchronized (lifecycleLock) {
+            if (closed) throw new IllegalStateException("Runtime is closed");
+            if (scheduler == null) {
+                var executor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+                    Thread thread = new Thread(task, "license-checkpoint"); thread.setDaemon(true); return thread;
+                });
+                start(executor);
+            }
+        }
+        return this;
+    }
+    LicenseRuntime start(java.util.concurrent.ScheduledExecutorService executor) {
+        synchronized (lifecycleLock) {
+            if (closed) throw new IllegalStateException("Runtime is closed");
+            if (scheduler != null) return this;
+            scheduler = executor;
+            try { executor.scheduleWithFixedDelay(this::scheduledCheckpoint, 30, 30, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (RuntimeException error) { scheduler = null; executor.shutdownNow(); throw error; }
+        }
+        return this;
+    }
+    private void scheduledCheckpoint() {
+        try {
+            Snapshot result = checkpoint();
+            if (result.state() != State.ACTIVE) System.getLogger(LicenseRuntime.class.getName())
+                .log(System.Logger.Level.WARNING, "License checkpoint: " + result.state().name());
+        } catch (RuntimeException error) {
+            System.getLogger(LicenseRuntime.class.getName()).log(System.Logger.Level.WARNING, "License checkpoint failed");
+        }
+    }
+    /** Waits outside the Runtime monitor, so an executing checkpoint can finish. */
+    @Override public void close() {
+        synchronized (lifecycleLock) {
+            closed = true;
+            if (scheduler == null) return;
+            scheduler.shutdown();
+            boolean interrupted = false;
+            while (!scheduler.isTerminated()) {
+                try { scheduler.awaitTermination(1, java.util.concurrent.TimeUnit.DAYS); }
+                catch (InterruptedException error) { interrupted = true; }
+            }
+            scheduler = null;
+            if (interrupted) Thread.currentThread().interrupt();
+        }
+    }
+
+    /** A request contains purpose-derived IDs, never the host identifier or installation key. */
+    public synchronized Map<String, Object> commercialRequest() throws IOException {
+        if (productConfig == null) throw new OnboardingException(OnboardingException.Code.CONFIG_INVALID);
+        Installation identity = identity();
+        String binding;
+        try { binding = binding(identity); }
+        catch (LicenseException unavailable) { throw new OnboardingException(OnboardingException.Code.BINDING_UNAVAILABLE); }
+        var data = new java.util.LinkedHashMap<String, Object>();
+        data.put("schema_version", 1); data.put("kind", "license-request");
+        data.put("product_id", config.productId()); data.put("request_id", UUID.randomUUID().toString());
+        data.put("binding_type", "HOST_INSTALL"); data.put("binding_scheme", "host-install-code-v1");
+        data.put("binding_id", binding); data.put("request_code", new ManualCodeCodec(productConfig.requestPrefix()).encodeHex(binding));
+        data.put("generated_at", time.utcNow().truncatedTo(ChronoUnit.SECONDS).toString());
+        return java.util.Collections.unmodifiableMap(data);
+    }
+
+    public enum ImportActionStatus { APPLIED, ALREADY_APPLIED, OUTCOME_UNKNOWN }
+    public record ImportResult(ImportActionStatus actionStatus, String fileDigest, Snapshot status) { }
+
+    /** Raw-byte digest for optimistic publishing; missing differs from unreadable. */
+    public String licenseFileDigest() throws IOException {
+        return new OnboardingFiles().rawDigest(config.licenseFile());
+    }
+
+    /** Lock order: shared publishing lock, then this Runtime; clock operations never take the publishing lock. */
+    public ImportResult importLicense(byte[] raw, String expectedFileDigest) throws IOException {
+        return importLicense(raw, expectedFileDigest, new OnboardingFiles());
+    }
+    ImportResult importLicense(byte[] raw, String expectedFileDigest, OnboardingFiles files) throws IOException {
+        if (raw == null || raw.length < 1 || raw.length > CommercialLicenseVerifier.MAX_FILE_BYTES)
+            throw new OnboardingException(OnboardingException.Code.CANDIDATE_REJECTED);
+        if (expectedFileDigest != null && !expectedFileDigest.matches("[0-9a-f]{64}"))
+            throw new IllegalArgumentException("Expected raw file digest must be SHA-256 or null for absent");
+        byte[] candidate = raw.clone();
+        String candidateDigest = digest(candidate);
+        Path target = OnboardingFiles.checked(config.licenseFile());
+        return files.withLock(target.resolveSibling("license-import.lock"), () -> {
+            synchronized (this) {
+                String actual = files.rawDigest(target);
+                if (!Objects.equals(actual, expectedFileDigest))
+                    throw new OnboardingException(OnboardingException.Code.LICENSE_STATE_CONFLICT);
+                if (candidateDigest.equals(actual)) {
+                    preflight(candidate); // Same-byte confirmation still validates signature, scope and actual binding.
+                    boolean confirmed;
+                    try { confirmed = files.confirm(target, candidate); }
+                    catch (IOException | UnsupportedOperationException error) {
+                        return importResult(ImportActionStatus.OUTCOME_UNKNOWN, candidateDigest);
+                    }
+                    if (!confirmed) throw new OnboardingException(OnboardingException.Code.LICENSE_STATE_CONFLICT);
+                    return importResult(ImportActionStatus.ALREADY_APPLIED, candidateDigest);
+                }
+                CommercialLicenseVerifier.VerifiedLicense checked = preflight(candidate);
+                if (checked.status() != CommercialLicenseVerifier.Status.ACTIVE)
+                    throw new OnboardingException(OnboardingException.Code.CANDIDATE_REJECTED);
+                StateStore.CommitOutcome outcome = files.publish(target, candidate);
+                if (outcome == StateStore.CommitOutcome.NOT_COMMITTED)
+                    throw new OnboardingException(OnboardingException.Code.STORAGE_FAILED);
+                return importResult(outcome == StateStore.CommitOutcome.COMMITTED ? ImportActionStatus.APPLIED
+                    : ImportActionStatus.OUTCOME_UNKNOWN, candidateDigest);
+            }
+        });
+    }
+    private ImportResult importResult(ImportActionStatus action, String fileDigest) {
+        try { return new ImportResult(action, fileDigest, inspect()); }
+        catch (RuntimeException error) { return new ImportResult(ImportActionStatus.OUTCOME_UNKNOWN, fileDigest, null); }
+    }
 
     public LicenseRuntime(Config config, Map<String, PublicKey> trustRing, TimeSource time) {
         this(config, trustRing, time, new FileStateStore());

@@ -76,7 +76,7 @@ def main():
     parser.add_argument(
         "--java-jar",
         type=Path,
-        default=sdk / "java/license-core/build/libs/license-core-0.6.0.jar",
+        default=sdk / "java/license-core/build/libs/license-core-0.7.0.jar",
     )
     jar = parser.parse_args().java_jar.resolve()
     now = datetime.now(UTC).replace(microsecond=0) + timedelta(minutes=10)

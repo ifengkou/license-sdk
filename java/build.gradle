@@ -5,7 +5,7 @@ subprojects {
     apply plugin: 'maven-publish'
 
     group = 'io.metor.license'
-    version = '0.6.0'
+    version = '0.7.0'
     repositories { mavenCentral() }
     java {
         toolchain { languageVersion = JavaLanguageVersion.of(21) }
