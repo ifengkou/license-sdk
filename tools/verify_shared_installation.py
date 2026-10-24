@@ -387,4 +387,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (AssertionError, OSError, subprocess.SubprocessError) as error:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            message = (
+                str(error)[:8000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            )
+            print(f"::error title=SDK POSIX verification::{message}", flush=True)
+        raise

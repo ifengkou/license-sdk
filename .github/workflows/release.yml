@@ -124,6 +124,8 @@ jobs:
     needs: [python, java]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    env:
+      POSIX_VERIFY_ROOT: /tmp/license-sdk-posix
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -152,19 +154,19 @@ jobs:
           tar -xzf "$sdk_bundle" -C "$RUNNER_TEMP/posix-sdk"
           cd "$RUNNER_TEMP/posix-sdk/license-sdk-python-$sdk_version-cp312-linux-x86_64"
           sha256sum -c SHA256SUMS
-          python -m venv "$RUNNER_TEMP/posix-venv"
-          "$RUNNER_TEMP/posix-venv/bin/python" -m pip install --no-index --find-links=wheelhouse --require-hashes -r requirements-core.txt
+          python -m venv "$POSIX_VERIFY_ROOT/venv"
+          "$POSIX_VERIFY_ROOT/venv/bin/python" -m pip install --no-index --find-links=wheelhouse --require-hashes -r requirements-core.txt
       - name: Verify different UIDs, interruption and a read-only bind mount
         shell: bash
         run: |
           sdk_version=$(python tools/release.py check-version)
           sdk_jar=$(find "$GITHUB_WORKSPACE/posix-inputs/java" -name "license-core-$sdk_version.jar")
-          sudo env JAVA_HOME="$JAVA_HOME" "$RUNNER_TEMP/posix-venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$RUNNER_TEMP/shared-installation"
-          mkdir -p "$RUNNER_TEMP/shared-installation-ro"
-          sudo mount --bind "$RUNNER_TEMP/shared-installation" "$RUNNER_TEMP/shared-installation-ro"
-          trap 'sudo umount "$RUNNER_TEMP/shared-installation-ro"' EXIT
-          sudo mount -o remount,bind,ro "$RUNNER_TEMP/shared-installation-ro"
-          sudo env JAVA_HOME="$JAVA_HOME" "$RUNNER_TEMP/posix-venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$RUNNER_TEMP/shared-installation-ro" --check-only
+          sudo env JAVA_HOME="$JAVA_HOME" GITHUB_ACTIONS=true "$POSIX_VERIFY_ROOT/venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$POSIX_VERIFY_ROOT/installation"
+          mkdir -p "$POSIX_VERIFY_ROOT/installation-ro"
+          sudo mount --bind "$POSIX_VERIFY_ROOT/installation" "$POSIX_VERIFY_ROOT/installation-ro"
+          trap 'sudo umount "$POSIX_VERIFY_ROOT/installation-ro"' EXIT
+          sudo mount -o remount,bind,ro "$POSIX_VERIFY_ROOT/installation-ro"
+          sudo env JAVA_HOME="$JAVA_HOME" GITHUB_ACTIONS=true "$POSIX_VERIFY_ROOT/venv/bin/python" tools/verify_shared_installation.py --java-jar "$sdk_jar" --work-dir "$POSIX_VERIFY_ROOT/installation-ro" --check-only
 
   release:
     name: Publish GitHub Release
