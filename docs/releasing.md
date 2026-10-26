@@ -74,7 +74,7 @@ dependencies {
 
 需要独立 CLI 或简单 classpath 接入时可使用单个 JAR。采用 Maven／Gradle 坐标的产品优先使用上面的完整仓库包；`license-spring` 不是包含全部依赖的 fat JAR，核心 CLI 不需要它。
 
-下一步从对应 Issuer 下载公开配置，按 [五步接入](integration-cn.md) 执行 init／status／request／import，并在产品中创建 Runtime、调用 guard。不要下载别的产品的公钥配置。
+下一步从对应 Issuer 下载公开配置，按 [接入与交付指南](integration-cn.md) 先完成 Runtime、状态和业务 guard 集成，再构建交付，在目标安装执行 init，最后申请、签发并导入许可。不要下载别的产品的公钥配置。
 
 ## Python：完整依赖离线安装
 

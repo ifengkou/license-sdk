@@ -2,36 +2,21 @@
 
 SDK 发行与下载见 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 和 [发行／离线安装文档](docs/releasing.md)。维护者按文档推送版本 tag，CI 自动测试、构建并发布制品。
 
-## 新产品五步接入（0.7.1）
+## 新产品按四个阶段接入（0.7.1）
 
-1. 安装本语言 SDK，从 Issuer 的“SDK 接入配置”下载 `license-product.json`，纳入产品受控资源。
-2. 执行 SDK `init`，自动生成安装身份、随机主密钥和全部服务 clock，无需手写文件。
-3. 从资源字节创建原 Runtime，应用生命周期调用 `start()`／`close()`，SDK 内部维护 checkpoint。
-4. SDK `request` 导出申请 → Issuer 签发 → SDK `import` 安全发布 → 状态 ACTIVE。
-5. 在账号鉴权后、关键业务副作用前调用同一个 Runtime 的 guard。
+1. **开发接入：** 在自己的产品工程安装 SDK、下载固定公开配置，创建 Runtime，接入状态查询和关键业务 guard。
+2. **构建发布：** 把程序、SDK、完整运行依赖与同一份公开配置纳入安装包或镜像，不打包开发机的授权数据。
+3. **首次部署：** 在目标安装目录准备机器标识路径和空 `license-data`，单独执行 SDK `init`，然后启动产品。
+4. **授权开通：** CLI 或产品管理页导出申请 → Issuer 签发 → SDK 导入许可 → 查询 ACTIVE。
 
-完整命令、Python／Java 包内读取代码和进阶部署见 [五步接入](docs/integration-cn.md)。Java 只需要 JDK；不依赖 ICP 的 deployment 或任何业务源码。SDK 不包含签发私钥。
-
-```bash
-# Python：在安装好 SDK 的产品环境执行，gateway 替换为下载配置中的真实服务。
-license-sdk init --config license-product.json --root ./license-data
-license-sdk status --config license-product.json --root ./license-data --service gateway
-license-sdk request --config license-product.json --root ./license-data --service gateway --output request.json
-# 将 request.json 交 Issuer，保存签名下载文件为 customer.license.json。
-license-sdk import --config license-product.json --root ./license-data --service gateway --file customer.license.json
-
-# Java：相同动作由可执行核心 JAR 提供，后续 status/request/import 参数相同。
-java -jar license-core-0.7.1.jar init --config license-product.json --root ./license-data
-```
-
-配置公开但决定信任，必须随产品固化；不要允许客户上传或覆盖。普通首次安装使用当前账号私有目录；已有安装保留原身份／key／clock，重复 init 只核对。多账号容器权限由产品部署负责，现有 ICP 装配不会自动迁移。正式制品由 GitHub Releases 提供，既有版本不覆盖。
+完整的目录结构、下载解压命令、Python／Java 集成代码、macOS 测试和 Linux 部署步骤见 [接入与交付指南](docs/integration-cn.md)。开发者可在本机独立测试目录演练后两个阶段。Java 只需 JDK 21；不依赖 ICP 工程。客户启动不联网安装依赖，也不连接 Issuer。
 
 
 通用离线软件授权 SDK，独立于业务工程维护，提供 Java 和 Python 实现。当前源码版本为 `0.7.1`，正式制品见 GitHub Releases，许可文件协议为 `schema_version = 1`；SDK 发行版本与文件协议版本分别管理。
 
 提供配置加载、通用初始化、商业申请／安全导入、商业许可验签、安装身份观察、时间保护与预检。2026-10-22 起产品接入收敛为可配置的 HTTP 请求入口校验；各服务独立验证。后台任务准入、原任务续接及业务流程授权不在范围内；单服务签名时间恢复已实现，客户最终交付验收另行实施。
 
-产品接入请先读 [SDK 0.7.1 五步接入与升级](docs/integration-cn.md)，包含 Java/Python 完整构造示例、生命周期、请求 guard、包内清单和在线恢复适配；底层验签 API 不包含持久时间保护。
+产品接入请先读 [SDK 0.7.1 接入与交付指南](docs/integration-cn.md)，按开发、构建、首次部署和授权开通说明 Java/Python 接入；底层验签 API 不包含持久时间保护。
 
 ## 项目职责
 

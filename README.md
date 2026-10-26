@@ -2,32 +2,17 @@
 
 SDK 发行与下载见 [GitHub Releases](https://github.com/ifengkou/license-sdk/releases) 和 [发行／离线安装文档](docs/releasing.md)。推送版本 tag 后，CI 构建 Java JAR、Python wheel 和目标平台完整离线依赖包。
 
-## 新产品五步接入（0.7.1）
+## 新产品按四个阶段接入（0.7.1）
 
-1. 安装本语言 SDK，从 Issuer 的“SDK 接入配置”下载 `license-product.json`，纳入产品受控资源。
-2. 执行 SDK `init`，自动生成安装身份、随机主密钥和全部服务 clock，无需手写文件。
-3. 从资源字节创建原 Runtime，应用生命周期调用 `start()`／`close()`，SDK 内部维护 checkpoint。
-4. SDK `request` 导出申请 → Issuer 签发 → SDK `import` 安全发布 → 状态 ACTIVE。
-5. 在账号鉴权后、关键业务副作用前调用同一个 Runtime 的 guard。
+1. **开发接入：** 在自己的产品工程安装 SDK、下载固定公开配置，创建 Runtime，接入状态查询和关键业务 guard。
+2. **构建发布：** 把程序、SDK、完整运行依赖与同一份公开配置纳入安装包或镜像，不打包开发机的授权数据。
+3. **首次部署：** 在目标安装目录准备机器标识路径和空 `license-data`，单独执行 SDK `init`，然后启动产品。
+4. **授权开通：** CLI 或产品管理页导出申请 → Issuer 签发 → SDK 导入许可 → 查询 ACTIVE。
 
-完整命令、Python／Java 包内读取代码和进阶部署见 [五步接入](docs/integration-cn.md)。Java 只需要 JDK；不依赖 ICP 的 deployment 或任何业务源码。SDK 不包含签发私钥。
-
-```bash
-# Python：在安装好 SDK 的产品环境执行，gateway 替换为下载配置中的真实服务。
-license-sdk init --config license-product.json --root ./license-data
-license-sdk status --config license-product.json --root ./license-data --service gateway
-license-sdk request --config license-product.json --root ./license-data --service gateway --output request.json
-# 将 request.json 交 Issuer，保存签名下载文件为 customer.license.json。
-license-sdk import --config license-product.json --root ./license-data --service gateway --file customer.license.json
-
-# Java：相同动作由可执行核心 JAR 提供，后续 status/request/import 参数相同。
-java -jar license-core-0.7.1.jar init --config license-product.json --root ./license-data
-```
-
-配置公开但决定信任，必须随产品固化；不要允许客户上传或覆盖。普通首次安装使用当前账号私有目录；已有安装保留原身份／key／clock，重复 init 只核对。多账号容器权限由产品部署负责，现有 ICP 装配不会自动迁移。正式制品由 GitHub Releases 提供，既有版本不覆盖。
+完整的目录结构、下载解压命令、Python／Java 集成代码、macOS 测试和 Linux 部署步骤见 [接入与交付指南](docs/integration-cn.md)。开发者可在本机独立测试目录演练后两个阶段。Java 只需 JDK 21；不依赖 ICP 工程。客户启动不联网安装依赖，也不连接 Issuer。
 
 
-[中文使用说明](README_cn.md) · [0.7.1 五步接入与升级](docs/integration-cn.md)
+[中文使用说明](README_cn.md) · [0.7.1 接入与交付指南](docs/integration-cn.md)
 
 独立于业务工程的离线许可 SDK。提供商业文件验签、安装身份观察、持久化时间保护和 HTTP 入口使用的本地校验结果。产品在受控请求入口及少数固定关键方法首行调用同一 guard，各服务独立验证，不深入后台业务流程。
 

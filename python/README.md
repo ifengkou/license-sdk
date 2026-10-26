@@ -70,9 +70,13 @@ platform dependency wheels. Do this at build/install time, never application sta
    error response. Admin status, request/import and recovery must remain accessible
    through their own authentication when business operations are restricted.
 
-[examples/quick_start.py](examples/quick_start.py) uses installed SDK APIs end to end;
-run `python examples/quick_start.py --help`. No installation file format knowledge
-or application-specific deployment project is needed.
+[examples/quick_start.py](examples/quick_start.py) demonstrates Runtime startup,
+status and the business guard using the installed SDK. Place the public
+`license-product.json` beside the example and initialize the data directory with
+CLI `init` before running it. Use CLI `request` and `import` separately for
+activation; ordinary example startup does none of these operations.
+Run `python examples/quick_start.py --help` for its Runtime options. No installation
+file format knowledge or application-specific deployment project is needed.
 
 `runtime.commercial_request()` returns the exact issuer request object.
 `runtime.license_file_digest()` supplies the current full raw-file SHA-256 or `None`
@@ -134,7 +138,7 @@ snapshot atomic. Archive paths, permissions and restore policy remain the
 deployment tool's responsibility.
 
 
-[中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
+[中文接入与交付指南](../docs/integration-cn.md)：按开发接入、构建发布、首次部署和授权开通分阶段操作。
 
 Two separately built distributions: `metor-license-core` (framework-independent) and
 `metor-license-fastapi` (explicit request dependency adapter). Workspace linkage is internal

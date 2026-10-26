@@ -2,7 +2,7 @@
 
 Download the core JAR or versioned Maven repository archive from [GitHub Releases](https://github.com/ifengkou/license-sdk/releases). See [release and offline installation](../docs/releasing.md) for checksums, Maven coordinates, local JAR usage, and the tag-based CI release procedure. The core requires JDK 21 only.
 
-[中文接入与升级指南](../docs/integration-cn.md)：固定制品、Runtime 构造、生命周期、请求拦截及恢复 API。
+[中文接入与交付指南](../docs/integration-cn.md)：按开发接入、构建发布、首次部署和授权开通分阶段操作。
 
 Java 21 standalone Gradle project. Maven coordinates are
 `io.metor.license:license-core:0.7.1` and `io.metor.license:license-spring:0.7.1`.

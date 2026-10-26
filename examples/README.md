@@ -14,6 +14,17 @@ from the workspace root for actual CLI issuance and Java/Python verification; se
 Temporary synthetic keys never enter release artifacts. Consumers use fixed release packages,
 not business repository or issuer source imports.
 
-For runtime-protected entry points use `LicenseRuntime.requireValid()` (Java) or `require_valid()` (Python), catch the typed refusal once in the host error adapter, and schedule `checkpoint()` every 30 seconds independently of requests. The FastAPI adapter is `require_license(guard)`. These entry checks never force a checkpoint or select read-only business modes.
+For runtime-protected entry points use `LicenseRuntime.requireValid()` (Java) or
+`require_valid()` (Python), and catch the typed refusal once in the host error adapter.
+Call `runtime.start()` at application startup and `runtime.close()` at shutdown;
+the SDK maintains a checkpoint every 30 seconds even without requests. Do not add
+a separate checkpoint scheduler. The FastAPI adapter is `require_license(guard)`.
+These entry checks never force a checkpoint or select read-only business modes.
+
+The Java and Python quick-start programs demonstrate Runtime startup, status and
+the business guard. Initialize installation data separately with the SDK CLI's
+`init` command before running them; use CLI `request` and `import` for activation.
+The example programs do not initialize data, export requests or import licenses
+on ordinary startup.
 
 For complete Java/Python Runtime construction and protected-entry examples, use the [Chinese integration guide](../docs/integration-cn.md). Its examples share one long-lived runtime per service; low-level verification alone does not provide persistent rollback protection.
